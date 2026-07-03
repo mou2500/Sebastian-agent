@@ -1,0 +1,5 @@
+node_modules/
+pip/
+__pycache__/
+*.pyc
+.claude/
