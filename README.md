@@ -1,5 +1,9 @@
 # Sebastian — 工程管家 v2
 
+<p align="center">
+  <img src="assets/Sebastian_logo.svg" alt="Sebastian Logo" width="400"/>
+</p>
+
 > 版本 2.4.0 | 作者：[何牟](https://github.com/mou2500)
 
 Sebastian 是一个**元技能（meta-skill）**，负责编排多步骤工作流。它是调度员，不是执行者。
@@ -8,6 +12,11 @@ Sebastian 是一个**元技能（meta-skill）**，负责编排多步骤工作�
 
 ```
 Sebastian-agent/
+├── assets/
+│   ├── Sebastian_logo.svg   ← Logo（矢量）
+│   ├── Sebastian_logo.png   ← Logo（位图）
+│   ├── Sebastian_logo.jpg   ← Logo（JPEG）
+│   └── Sebastian_logo.af    ← Logo（Affinity Designer 源文件）
 ├── sk/sebastian/
 │   ├── SKILL.md          ← 技能本体
 │   └── CHANGELOG.md      ← 更新日志
