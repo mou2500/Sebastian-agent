@@ -1,10 +1,10 @@
 ---
 name: sebastian
 description: 工程管家 v2 — 分析任务、加权匹配 skills、编排多步骤工作流、管理工具索引
-version: 2.4.0
+version: 2.5.0
 tags: [orchestration, management, meta, workflow]
-capabilities: 意图理解（Phase 0 流水线）、任务分析与拆解、skills 加权匹配与三级定级、多步骤工作流编排、工具索引管理与健康诊断、工作流复盘与学习日志
-scenarios: 复杂多步骤任务、技能发现与管理、工作流规划、索引健康诊断、学习复盘
+capabilities: 意图理解（Phase 0 流水线）、任务分析与拆解、skills 加权匹配与三级定级、**外部工具匹配与关键词触发**、多步骤工作流编排、工具索引管理与健康诊断、工作流复盘与学习日志
+scenarios: 复杂多步骤任务、技能发现与管理、工作流规划、索引健康诊断、学习复盘、**外部工具路由与触发**
 paired_with: [find-skill, darwin-skill, skill-creator, skill-rpg-loop]
 source: internal
 ---
@@ -14,10 +14,11 @@ source: internal
 ## 概述
 
 Sebastian 是一个元技能（meta-skill），负责：
-1. 根据用户的任务描述，**加权匹配**已安装的 skills 索引，选拔最合适的工具
+1. 根据用户的任务描述，**加权匹配**已安装的 skills + **外部工具** 索引，选拔最合适的工具
 2. 编排多步骤工作流，处理步骤依赖
-3. 管理 skills 索引（更新、列出、搜索、健康诊断）
+3. 管理工具索引（更新、列出、搜索、健康诊断）
 4. **识别与同类型技能的边界**，做出正确的路由决策
+5. **通过关键词触发外部工具和插件** — 用户提及 job search/求职等关键词时，自动路由到 career-ops 等外部工具；提及写小说/网文等关键词时，自动路由到 webnovel-writer 等插件
 
 **核心理念：** Sebastian **不直接调用**其他 skills，也不自行完成任务。它生成工作流方案，由 Claude 按步骤执行。它是调度员，不是执行者。
 
@@ -60,7 +61,7 @@ Sebastian 是一个元技能（meta-skill），负责：
    - Intent.deliveryFormat vs 工具的 deliveryFormats → 是否需要额外步骤
 6. **冲突消解** — 应用上游优先 / 垂直分离 / 早退出 规则
 7. **识别工作流模板** — 任务类型是否匹配预定义的集成工作流
-8. **规划工作流** — 生成步骤序列，标注步骤依赖关系，每步注明技术路径类型（skill / 通用工具 / python 脚本等）
+8. **规划工作流** — 生成步骤序列，标注步骤依赖关系，每步注明技术路径类型（skill / external_tool / 通用工具 / python 脚本等）
 9. **展示方案** — 用以下格式向用户展示（每步必须包含"技术路径"和"依赖"）：
 
    ```
@@ -343,6 +344,135 @@ Phase 0 的意图分析结果，Phase 1 的匹配不能推翻——只能细化�
 
 ---
 
+## 外部工具匹配与路由（External Tool & Plugin Routing）
+
+除了 skills 之外，Sebastian 的索引中还包含**外部工具 (external_tool)** 和 **插件 (plugin)**，它们是独立项目中的脚本/工具集，不以 SKILL.md 形式存在，不能直接通过 `/` 斜杠命令调用（插件技能除外）。
+
+外部工具和插件的匹配和路由规则如下：
+
+### 匹配维度
+
+外部工具使用与 skills 相同的加权匹配策略，额外增加 `keywords` 字段：
+
+| 字段 | 权重 | 说明 |
+|------|------|------|
+| `name` | 高 | 工具名称匹配 |
+| `keywords` | **极高** | 触发关键词（精确命中时直接 EXACT） |
+| `tags` | 高 | 标签分类匹配 |
+| `description` | 中 | 描述关键词匹配 |
+| `capabilities` | 中 | 能力清单匹配 |
+| `scenarios` | 中 | 使用场景匹配 |
+| `subcommands` | 辅助 | 子命令名称匹配（如 "scan jobs" → career-ops） |
+
+### 关键词触发规则
+
+外部工具描述文件中包含 `trigger_confidence` 字段，定义两级关键词：
+
+- **`exact_keywords`** — 用户输入包含这些词 → 直接标记为 **EXACT (≥80%)**，不需反问
+- **`indirect_keywords`** — 用户输入包含这些词 → 标记为 **INDIRECT (50%)**，触发反问
+
+反问模板：
+> "我注意到你的需求涉及 <匹配的关键词>。<工具名> 是一个 <工具描述>。要我用它来处理吗？"
+
+### 外部工具的工作流步骤
+
+当匹配到外部工具时，工作流步骤的"技术路径"标注为 `external_tool`，步骤描述中包含：
+
+```
+步骤 N: <子命令或操作名>
+         — <做什么>
+         技术路径: external_tool
+         执行: cd <invoke_cwd> && <invoke_template> <args>
+```
+
+**关键规则：**
+- 外部工具不是通过 `/skillname` 调用的，而是通过**在指定目录下运行命令**
+- 工作流步骤的"执行"字段告诉用户/Claude 具体的命令
+- 对于有多个子命令的工具（如 career-ops），步骤描述中明确指定哪个子命令
+- 外部工具步骤执行时使用 Bash 运行命令，等待结果输出
+
+### Plugin 匹配与路由
+
+除了外部工具，索引中还包含 **Plugin (plugin)** 类型。Plugin 是 Claude Code 插件市场安装的插件，其技能通过 `/` 斜杠命令调用。
+
+#### Plugin 与 外部工具的区别
+
+| 维度 | 外部工具 (external_tool) | Plugin (plugin) |
+|------|--------------------------|-----------------|
+| 安装方式 | `git clone` + 手动部署 | `claude plugin install` |
+| 调用方式 | `cd <路径> && <命令>` | `/webnovel-*` 斜杠命令 |
+| 技能注册 | 无，需 Sebastian 路由 | 自动注册到 Claude Code |
+| 维护方式 | 手动更新 | `claude plugin update` |
+| 索引来源 | `external-tools/*.json` 描述文件 | `external-tools/*.json` 描述文件 + 插件缓存自动发现 |
+
+#### Plugin 匹配维度
+
+Plugin 使用与外部工具相同的匹配策略，额外支持：
+
+| 字段 | 权重 | 说明 |
+|------|------|------|
+| `name` | 高 | 插件名称匹配 |
+| `keywords` | **极高** | 触发关键词（精确命中时直接 EXACT） |
+| `subcommands` | 高 | 子命令名称匹配（如 "写章节" → webnovel-write） |
+| `invoke_prefix` | 辅助 | 斜杠命令前缀（如 `/webnovel-`） |
+
+#### Plugin 关键词触发规则
+
+与外部工具相同，使用 `trigger_confidence` 字段：
+
+- **`exact_keywords`** → 直接标记为 **EXACT (≥80%)**，不需反问
+- **`indirect_keywords`** → 标记为 **INDIRECT (50%)**，触发反问
+
+#### Plugin 的工作流步骤
+
+当匹配到 plugin 时，工作流步骤的"技术路径"标注为 `plugin`，步骤描述中包含：
+
+```
+步骤 N: /webnovel-<subcommand>
+         — <做什么>
+         技术路径: plugin
+         执行: 直接调用 /webnovel-<subcommand>
+```
+
+**关键规则：**
+- Plugin 技能通过 `/webnovel-*` 斜杠命令调用，不需要运行脚本
+- Plugin 技能是 Claude Code 原生支持的，命令自动注册
+- 由于 plugin 技能占用 token 预算，只在需要时调用对应的子命令
+- 调用前检查插件是否已启用（`claude plugin list`），如果未启用则提示用户先启用
+
+### 外部工具模版：求职工作流 (career-ops)
+
+当用户意图匹配 career-ops（找工作、求职、简历、面试、offer 评估等），以下是标准路由：
+
+| 用户意图 | 路由到 career-ops 子命令 | 调用方式 |
+|---------|------------------------|---------|
+| 搜索/扫描职位 | scan / pipeline | `cd D:/Projects/career-ops && node scan.mjs` |
+| 评估一个职位 (粘贴JD/URL) | auto-pipeline | Claude 直接执行（不需要运行命令） |
+| 评估 Offer | oferta | Claude 直接执行 |
+| 生成简历 PDF | pdf | `cd D:/Projects/career-ops && node generate-pdf.mjs` |
+| 查看申请状态 | tracker | Claude 直接执行 |
+| 面试准备 | interview-prep | Claude 直接执行 |
+| 公司研究 | deep | Claude 直接执行 |
+| 批量处理 | batch | 按 batch 流程 |
+| 比较多个 Offer | ofertas | Claude 直接执行 |
+
+**路由优先级：** 如果用户同时匹配了某个 skill 和 career-ops，依据置信度裁决。例如：
+- "帮我写份简历" → bifeng（文案写作）vs career-ops pdf（简历生成）
+  - 如果用户说的是"简历内容/文案" → 走 bifeng
+  - 如果用户说的是"生成简历 PDF / 更新简历文件" → 走 career-ops pdf
+- "帮我找找工作机会" → 直接走 career-ops scan/pipeline
+- "帮我评估一下这个 JD" → 直接走 career-ops oferta/auto-pipeline
+
+### 命令执行注意事项
+
+当工作流步骤需要运行外部命令时：
+1. 始终使用完整路径：`cd D:/Projects/career-ops && node script.mjs <args>`
+2. 如果用户未提供必要参数（如要评估的 URL），先向用户索取
+3. 外部命令的输出直接展示给用户，不做摘要改写（除非输出过长）
+4. 如果外部命令失败，向用户报告错误并建议替代方案
+
+---
+
 ## 工作流模板
 
 ### 模板 A：Bug 调试流程
@@ -431,6 +561,51 @@ Intent.coreType = copywriting → /bifeng（写文案）
 Intent.deliveryFormat = docx  → /docx（输出 .docx）
 ```
 
+### 模板 H：求职工作流（外部工具 — career-ops）
+
+适用于"找工作 / 求职 / 评估 offer / 扫描职位 / 简历生成 / 面试准备"
+
+触发条件：用户输入匹配 career-ops 的 keywords（找工作、求职、简历、面试、offer评估、scan jobs、pipeline 等）
+
+```
+步骤 1: 根据用户意图选择 career-ops 子命令:
+  - 搜索/扫描职位 → cd D:/Projects/career-ops && node scan.mjs
+  - 评估职位 (有JD/URL) → Claude 按 oferta/auto-pipeline 模式执行
+  - 生成简历 PDF → cd D:/Projects/career-ops && node generate-pdf.mjs
+  - 查看申请状态 → 读取 data/applications.md
+  - 面试准备 → Claude 按 interview-prep 模式执行
+  - 公司研究 → Claude 按 deep 模式执行
+步骤 2: 展示结果给用户，询问下一步操作
+步骤 3: (可选) 如果涉及追踪器更新 → cd D:/Projects/career-ops && node merge-tracker.mjs
+```
+
+### 模板 I：网文创作工作流（Plugin — webnovel-writer）
+
+适用于"写小说 / 网文创作 / 规划章节 / 审查章节 / 查询故事设定"
+
+触发条件：用户输入匹配 webnovel-writer 的 keywords（写小说、网文、创作、写作、章节、大纲、故事设定等）
+
+```
+步骤 1: 根据用户意图选择 webnovel-writer 子命令:
+  - 初始化小说项目 → /webnovel-init (分阶段引导创建故事骨架)
+  - 规划章节 → /webnovel-plan (分解卷/章节，填充时间线)
+  - 写作章节 → /webnovel-write (上下文→草稿→审查→润色→提交)
+  - 审查章节 → /webnovel-review (多维度评审：节奏、一致性、OOC等)
+  - 查询故事设定 → /webnovel-query (角色、伏笔、实体关系)
+  - 学习写作模式 → /webnovel-learn (记录有效技巧到长期记忆)
+  - 健康检查 → /webnovel-doctor (检查目录、DB、RAG、依赖)
+  - 可视化面板 → /webnovel-dashboard (项目状态、实体图谱)
+步骤 2: 展示结果给用户，询问下一步操作
+步骤 3: (可选) 如果涉及多个步骤 → 按依赖关系编排
+```
+
+**路由优先级：**
+- "写小说" → 直接 EXACT，走 webnovel-writer
+- "写一份营销文案" → 走 bifeng（文案写作），不触发 webnovel
+- 如果用户意图模糊（如"帮我写个故事"），根据上下文判断：
+  - 小说创作语境 → webnovel-writer
+  - 营销文案语境 → bifeng
+
 ---
 
 ## 与同类型技能的冲突边界
@@ -501,6 +676,8 @@ Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 
 | imagegen-frontend-mobile | `design` | image |
 | kami | `typesetting` | html |
 | sebastian | `meta` | none |
+| **career-ops** 🡒 外部工具 | `job-search` | pdf / md / none（取决于子命令） |
+| **webnovel-writer** 🡒 Plugin | `creative-writing` | md / json / none（取决于子命令） |
 
 ---
 

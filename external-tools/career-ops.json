@@ -1,0 +1,42 @@
+{
+  "name": "career-ops",
+  "type": "external_tool",
+  "version": "1.20.0",
+  "path": "D:/Projects/career-ops",
+  "description": "AI 求职自动化工具集 — 职位搜索、评估、简历生成、申请追踪、面试准备",
+  "tags": ["job-search", "career", "recruitment", "求职", "pipeline"],
+  "capabilities": "职位搜索与扫描(scan)、职位评估(oferta/auto-pipeline)、简历生成(pdf/latex)、求职追踪(tracker)、Offer比较(ofertas)、面试准备(interview-prep)、公司深度研究(deep)、LinkedIn人脉联系(contacto)、求职邮件生成(email)、批量处理(batch)、申请状态管理(tracker)、技能差距分析(upskill)、拒绝模式分析(patterns)",
+  "scenarios": "找工作、求职、跳槽、简历优化、面试准备、Offer评估、薪资谈判、职位搜索、求职追踪",
+  "keywords": ["找工作", "求职", "跳槽", "简历", "面试", "offer", "offer评估", "职位搜索", "招聘", "job", "career", "CV", "resume", "scan jobs", "pipeline", "申请追踪"],
+  "invoke_type": "command",
+  "invoke_cwd": "D:/Projects/career-ops",
+  "invoke_template": "node {{script}}",
+  "subcommands": {
+    "scan": "搜索新职位 — node scan.mjs",
+    "pipeline": "处理队列中的职位URL — 逐一评估",
+    "auto-pipeline": "整体评估：评估+报告+PDF+追踪",
+    "oferta": "评估单个Offer — 粘贴JD或URL",
+    "ofertas": "比较多个Offer",
+    "pdf": "生成简历PDF — node generate-pdf.mjs",
+    "evaluate": "评估职位 + 生成报告",
+    "tracker": "查看/管理申请状态",
+    "contacto": "LinkedIn人脉联系消息",
+    "email": "生成正式求职邮件",
+    "deep": "公司深度研究（6维度）",
+    "interview-prep": "面试准备",
+    "apply": "填写申请表",
+    "batch": "批量处理职位",
+    "patterns": "分析拒绝模式/改进策略",
+    "followup": "跟进提醒与节奏",
+    "reply-watch": "回复分类与处理",
+    "invite-match": "面试邀请匹配",
+    "upskill": "技能差距分析",
+    "detect-reposts": "重复职位检测",
+    "set-status": "更新申请状态",
+    "update": "更新career-ops系统"
+  },
+  "trigger_confidence": {
+    "exact_keywords": ["找工作", "求职", "简历", "面试", "offer评估", "职位搜索", "scan jobs", "job search"],
+    "indirect_keywords": ["跳槽", "招聘", "offer", "career", "申请", "投递", "简历更新"]
+  }
+}

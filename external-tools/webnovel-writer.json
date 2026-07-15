@@ -1,0 +1,27 @@
+{
+  "name": "webnovel-writer",
+  "type": "plugin",
+  "version": "6.2.1",
+  "path": "~/.claude/plugins/cache/webnovel-writer-marketplace/webnovel-writer/6.2.1",
+  "description": "长篇网文创作系统（skills + agents + data chain + RAG）— 提供故事创作全流程：初始化、规划、写作、审查、查询、学习、仪表盘",
+  "tags": ["webnovel", "writing", "网文", "创作", "plugin"],
+  "capabilities": "小说项目初始化(webnovel-init)、章节规划(webnovel-plan)、章节写作(webnovel-write)、章节审查(webnovel-review)、故事查询(webnovel-query)、模式学习(webnovel-learn)、项目健康检查(webnovel-doctor)、可视化仪表盘(webnovel-dashboard)",
+  "scenarios": "写小说、网文创作、故事规划、章节写作、小说审查、创意写作、长篇连载",
+  "keywords": ["写小说", "网文", "创作", "写作", "小说", "故事", "chapter", "webnovel", "章节", "大纲", "设定"],
+  "invoke_type": "plugin_command",
+  "invoke_prefix": "/webnovel-",
+  "subcommands": {
+    "webnovel-init": "初始化小说项目 — 分阶段引导创建故事骨架、设定、大纲",
+    "webnovel-plan": "规划章节 — 分解卷和章节，填充时间线，写入新设定",
+    "webnovel-write": "写作章节 — 上下文准备→草稿→审查→润色→事实提取→提交→备份",
+    "webnovel-review": "审查章节 — 多维度评审（节奏、一致性、OOC、连贯性、可读性）",
+    "webnovel-query": "查询故事设定 — 角色、伏笔、节奏、实体关系、运行时信息",
+    "webnovel-learn": "学习写作模式 — 将有效技巧记录到项目长期记忆",
+    "webnovel-doctor": "项目健康检查 — 检查目录、数据库、RAG、依赖、Dashboard 工件",
+    "webnovel-dashboard": "可视化面板 — 项目状态、实体图谱、章节内容、伏笔追踪"
+  },
+  "trigger_confidence": {
+    "exact_keywords": ["写小说", "网文", "写章节", "小说大纲", "webnovel"],
+    "indirect_keywords": ["写作", "创作", "故事", "章节", "大纲", "设定", "小说"]
+  }
+}

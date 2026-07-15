@@ -4,7 +4,7 @@
   <img src="assets/Sebastian_logo.svg" alt="Sebastian Logo" width="400"/>
 </p>
 
-> 版本 2.4.0 | 作者：[何牟](https://github.com/mou2500)
+> 版本 2.5.0 | 作者：[何牟](https://github.com/mou2500)
 
 Sebastian 是一个**元技能（meta-skill）**，负责编排多步骤工作流。它是调度员，不是执行者。
 
@@ -13,15 +13,15 @@ Sebastian 是一个**元技能（meta-skill）**，负责编排多步骤工作�
 ```
 Sebastian-agent/
 ├── assets/
-│   ├── Sebastian_logo.svg   ← Logo（矢量）
-│   ├── Sebastian_logo.png   ← Logo（位图）
-│   ├── Sebastian_logo.jpg   ← Logo（JPEG）
-│   └── Sebastian_logo.af    ← Logo（Affinity Designer 源文件）
+│   └── Sebastian_logo.svg   ← Logo（矢量）
 ├── sk/sebastian/
 │   ├── SKILL.md          ← 技能本体
 │   └── CHANGELOG.md      ← 更新日志
+├── external-tools/       ← 外部工具/插件描述文件
+│   ├── career-ops.json   ← 求职自动化工具
+│   └── webnovel-writer.json ← 网文创作插件
 ├── scripts/
-│   ├── scan.py           ← 技能扫描与索引工具
+│   ├── scan.py           ← 技能/工具/插件扫描索引
 │   └── enrich_frontmatter.py  ← 元数据增强
 ├── install.sh            ← 部署脚本
 ├── CONTEXT.md            ← 项目上下文
@@ -56,7 +56,10 @@ bash install.sh
 - **阈值熔断** — 匹配度不足时自动反问澄清
 - **Scope Guard** — 内容 vs 格式对齐检查
 - **冲突消解** — 上游优先 / 垂直分离 / 早退出规则
-- **7 种工作流模板** — 灵活编排多步骤任务
+- **外部工具路由** — 关键词触发独立项目脚本（career-ops 求职工具）
+- **Plugin 路由** — 关键词触发 Claude Code 插件技能（webnovel-writer 网文创作）
+- **工具索引管理** — 统一索引 skill / external_tool / plugin 三种类型
+- **8 种工作流模板** — 灵活编排多步骤任务
 - **双轨记录** — Lessons 复盘 + rpg-loop XP 经验值
 - **索引健康诊断** — 技能索引质量检查与修复
 

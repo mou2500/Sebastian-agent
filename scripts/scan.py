@@ -10,6 +10,7 @@ Usage:
     python3 scan.py --list          # Print summary table
     python3 scan.py --find <kw>     # Search by name/tags/capabilities/scenarios
     python3 scan.py --diagnose      # Print index health report
+    python3 scan.py --scan-plugins  # List installed plugins from cache
 """
 
 import json
@@ -27,6 +28,8 @@ DEFAULT_SKILL_PATHS = [
     os.path.expanduser("~/.claude/skills"),
     os.path.expanduser("~/.agents/skills"),
 ]
+DEFAULT_EXTERNAL_TOOLS_DIR = os.path.expanduser("~/.sebastian/external-tools")
+PLUGIN_CACHE_DIR = os.path.expanduser("~/.claude/plugins/cache")
 
 # ---------------------------------------------------------------------------
 #  Config
@@ -34,6 +37,7 @@ DEFAULT_SKILL_PATHS = [
 
 DEFAULT_CONFIG = {
     "skill_paths": ["~/.claude/skills", "~/.agents/skills"],
+    "external_tools_dir": "~/.sebastian/external-tools",
     "index_path": "~/.sebastian/index.json",
     "last_scan": None,
 }
@@ -155,6 +159,7 @@ def parse_yaml_simple(yaml_text):
 
 EMPTY_RECORD = {
     "name": "",
+    "type": "skill",
     "path": "",
     "description": "",
     "version": "",
@@ -168,11 +173,53 @@ EMPTY_RECORD = {
     "usage_count": 0,
 }
 
+EMPTY_EXTERNAL_TOOL_RECORD = {
+    "name": "",
+    "type": "external_tool",
+    "path": "",
+    "description": "",
+    "version": "",
+    "tags": [],
+    "capabilities": "",
+    "scenarios": "",
+    "keywords": [],
+    "invoke_type": "command",
+    "invoke_cwd": "",
+    "invoke_template": "{{script}}",
+    "subcommands": {},
+    "trigger_confidence": {},
+    "source": "external",
+    "external_url": "",
+    "update_method": "",
+    "usage_count": 0,
+}
+
+EMPTY_PLUGIN_RECORD = {
+    "name": "",
+    "type": "plugin",
+    "path": "",
+    "description": "",
+    "version": "",
+    "tags": [],
+    "capabilities": "",
+    "scenarios": "",
+    "keywords": [],
+    "invoke_type": "plugin_command",
+    "invoke_prefix": "",
+    "subcommands": {},
+    "trigger_confidence": {},
+    "source": "plugin",
+    "external_url": "",
+    "update_method": "plugin_update",
+    "usage_count": 0,
+}
+
 
 def record_from_frontmatter(fm, filepath):
     """Build an index record from parsed frontmatter dict."""
     rec = dict(EMPTY_RECORD)
     rec["path"] = filepath
+    rec["type"] = "skill"
     for k in ("name", "description", "version", "capabilities", "scenarios",
               "source", "external_url", "update_method"):
         if k in fm:
@@ -187,6 +234,7 @@ def record_from_frontmatter(fm, filepath):
 def record_from_body(filepath, text):
     """Build a minimal index record from file body when no frontmatter exists."""
     rec = dict(EMPTY_RECORD)
+    rec["type"] = "skill"
     basename = os.path.basename(os.path.dirname(filepath))
     rec["name"] = basename or Path(filepath).stem
     rec["path"] = filepath
@@ -217,23 +265,137 @@ def discover_skill_files(skill_paths):
     return sorted(files)
 
 
+# ---------------------------------------------------------------------------
+#  External tool discovery
+# ---------------------------------------------------------------------------
+
+
+def discover_external_tools(external_tools_dir):
+    """Find all external tool JSON descriptors under the given directory."""
+    expanded = os.path.expanduser(external_tools_dir)
+    if not os.path.isdir(expanded):
+        return []
+    files = sorted(
+        os.path.join(expanded, f)
+        for f in os.listdir(expanded)
+        if f.endswith(".json")
+    )
+    return files
+
+
+def load_tool_descriptor(filepath):
+    """Load and validate a tool descriptor JSON file (external_tool or plugin)."""
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"  [error] Failed to load {filepath}: {e}", file=sys.stderr)
+        return None
+
+    tool_type = data.get("type", "external_tool")
+
+    if tool_type == "plugin":
+        rec = dict(EMPTY_PLUGIN_RECORD)
+    else:
+        rec = dict(EMPTY_EXTERNAL_TOOL_RECORD)
+
+    rec["path"] = os.path.normpath(filepath)
+
+    template = EMPTY_PLUGIN_RECORD if tool_type == "plugin" else EMPTY_EXTERNAL_TOOL_RECORD
+    for field in template:
+        if field in data:
+            rec[field] = data[field]
+
+    # Ensure name is set
+    if not rec["name"]:
+        rec["name"] = os.path.splitext(os.path.basename(filepath))[0]
+
+    # Auto-detect version from plugin cache if available
+    if tool_type == "plugin" and not rec.get("version"):
+        cache_path = get_plugin_cache_path(rec["name"])
+        if cache_path:
+            rec["path"] = cache_path
+
+    return rec
+
+
+def get_plugin_cache_path(plugin_name):
+    """Find the latest version cache path for a given plugin by scanning cache."""
+    cache_dir = PLUGIN_CACHE_DIR
+    if not os.path.isdir(cache_dir):
+        return None
+
+    # Scan: ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/
+    for marketplace in os.listdir(cache_dir):
+        mp_dir = os.path.join(cache_dir, marketplace)
+        if not os.path.isdir(mp_dir):
+            continue
+        for plugin_dir in os.listdir(mp_dir):
+            if plugin_dir == plugin_name:
+                pdir = os.path.join(mp_dir, plugin_dir)
+                if not os.path.isdir(pdir):
+                    continue
+                versions = sorted(
+                    v for v in os.listdir(pdir)
+                    if os.path.isdir(os.path.join(pdir, v))
+                )
+                if versions:
+                    return os.path.normpath(os.path.join(pdir, versions[-1]))
+    return None
+
+
+def discover_installed_plugins():
+    """Auto-discover installed plugins from Claude Code cache directory."""
+    cache_dir = PLUGIN_CACHE_DIR
+    if not os.path.isdir(cache_dir):
+        return []
+
+    plugins = []
+    for marketplace in sorted(os.listdir(cache_dir)):
+        mp_dir = os.path.join(cache_dir, marketplace)
+        if not os.path.isdir(mp_dir):
+            continue
+        for plugin_dir in sorted(os.listdir(mp_dir)):
+            pdir = os.path.join(mp_dir, plugin_dir)
+            if not os.path.isdir(pdir):
+                continue
+            versions = sorted(
+                v for v in os.listdir(pdir)
+                if os.path.isdir(os.path.join(pdir, v))
+            )
+            if versions:
+                latest = versions[-1]
+                skill_dir = os.path.join(pdir, latest, "skills")
+                plugin_info = {
+                    "name": plugin_dir,
+                    "marketplace": marketplace,
+                    "version": latest,
+                    "path": os.path.normpath(os.path.join(pdir, latest)),
+                    "has_skills": os.path.isdir(skill_dir),
+                    "skill_names": sorted(os.listdir(skill_dir)) if os.path.isdir(skill_dir) else [],
+                }
+                plugins.append(plugin_info)
+    return plugins
+
+
 def scan(config_path=None):
-    """Full scan: read config, discover files, parse, merge, write index."""
+    """Full scan: discover skills + external tools, parse, merge, write index."""
     cfg = load_config(config_path)
     skill_paths = [os.path.expanduser(p) for p in cfg.get("skill_paths", [])]
+    ext_dir = os.path.expanduser(cfg.get("external_tools_dir", DEFAULT_EXTERNAL_TOOLS_DIR))
     index_path = os.path.expanduser(cfg.get("index_path", DEFAULT_INDEX_PATH))
 
-    print(f"[scan] Paths: {skill_paths}", file=sys.stderr)
+    print(f"[scan] Skills paths: {skill_paths}", file=sys.stderr)
+    print(f"[scan] External tools: {ext_dir}", file=sys.stderr)
     print(f"[scan] Index: {index_path}", file=sys.stderr)
-
-    # Discover
-    files = discover_skill_files(skill_paths)
-    print(f"[scan] Found {len(files)} SKILL.md file(s)", file=sys.stderr)
 
     # Load old index to preserve usage_count
     old_index = load_old_index(index_path)
 
-    # Parse each file
+    # --- Discover skills ---
+    files = discover_skill_files(skill_paths)
+    print(f"[scan] Found {len(files)} SKILL.md file(s)", file=sys.stderr)
+
     records = []
     for fp in files:
         with open(fp, "r", encoding="utf-8") as f:
@@ -246,6 +408,9 @@ def scan(config_path=None):
         else:
             rec = record_from_body(fp, body)
 
+        # Set type
+        rec["type"] = "skill"
+
         # Merge usage_count from old index
         old_rec = old_index.get(rec["name"])
         if old_rec:
@@ -253,7 +418,25 @@ def scan(config_path=None):
 
         records.append(rec)
         src = "frontmatter" if fm_text else "body"
-        print(f"  [{src}] {rec['name']}", file=sys.stderr)
+        print(f"  [skill] {rec['name']}", file=sys.stderr)
+
+    # --- Discover external tools ---
+    ext_files = discover_external_tools(ext_dir)
+    print(f"[scan] Found {len(ext_files)} external tool descriptor(s)", file=sys.stderr)
+
+    for fp in ext_files:
+        rec = load_tool_descriptor(fp)
+        if rec is None:
+            continue
+
+        # Merge usage_count from old index
+        old_rec = old_index.get(rec["name"])
+        if old_rec:
+            rec["usage_count"] = old_rec.get("usage_count", 0)
+
+        records.append(rec)
+        rtype = rec.get("type", "tool")
+        print(f"  [{rtype}] {rec['name']}", file=sys.stderr)
 
     # Write index
     _ensure_sebastian_dir()
@@ -267,19 +450,27 @@ def scan(config_path=None):
     cfg["last_scan"] = datetime.now(timezone.utc).isoformat()
     save_config(cfg, config_path or DEFAULT_CONFIG_PATH)
 
-    print(f"\n[scan] Done. {len(records)} skill(s) indexed.", file=sys.stderr)
+    skills = sum(1 for r in records if r.get('type') == 'skill')
+    ext_tools = sum(1 for r in records if r.get('type') == 'external_tool')
+    plugins = sum(1 for r in records if r.get('type') == 'plugin')
+    print(f"\n[scan] Done. {len(records)} tool(s) indexed ({skills} skills, {ext_tools} external tools, {plugins} plugins).", file=sys.stderr)
     return records
 
 
 def load_old_index(index_path):
-    """Load existing index by name for merging usage_count."""
+    """Load existing index by name for merging usage_count.
+    Handles both array (scan.py format) and dict (manual/legacy format)."""
     if not os.path.exists(index_path):
         return {}
     try:
         with open(index_path, "r", encoding="utf-8") as f:
-            records = json.load(f)
-        return {r["name"]: r for r in records if r.get("name")}
-    except (json.JSONDecodeError, KeyError):
+            data = json.load(f)
+        if isinstance(data, dict):
+            # Legacy dict format: {name: record}
+            return data
+        # Array format: [{name: ...}, ...]
+        return {r["name"]: r for r in data if r.get("name")}
+    except (json.JSONDecodeError, KeyError, TypeError):
         return {}
 
 
@@ -306,28 +497,34 @@ def cmd_list(index_path=None):
     # Column widths
     name_w = max(len(r.get("name", "")) for r in records)
     name_w = max(name_w, 4) + 2
+    type_w = max(len(r.get("type", "") or "") for r in records)
+    type_w = max(type_w, 12) + 2
     ver_w = max(len(r.get("version", "") or "") for r in records)
     ver_w = max(ver_w, 7) + 2
     src_w = max(len(r.get("source", "") or "") for r in records)
     src_w = max(src_w, 6) + 2
     cnt_w = 6
 
-    sep = "+" + "-" * (name_w + 2) + "+" + "-" * (ver_w + 2) + "+" + "-" * (src_w + 2) + "+" + "-" * cnt_w + "+"
+    sep = "+" + "-" * (name_w + 2) + "+" + "-" * (type_w + 2) + "+" + "-" * (ver_w + 2) + "+" + "-" * (src_w + 2) + "+" + "-" * cnt_w + "+"
 
     # Header
     print(sep)
-    print(f"| {'Name'.ljust(name_w - 1)}| {'Version'.ljust(ver_w - 1)}| {'Source'.ljust(src_w - 1)}| {'Uses'.ljust(cnt_w - 1)}|")
+    print(f"| {'Name'.ljust(name_w - 1)}| {'Type'.ljust(type_w - 1)}| {'Version'.ljust(ver_w - 1)}| {'Source'.ljust(src_w - 1)}| {'Uses'.ljust(cnt_w - 1)}|")
     print(sep.replace("-", "="))
 
     for r in records:
         name = r.get("name", "")[:name_w]
+        rtype = (r.get("type") or "")[: type_w]
         ver = (r.get("version") or "")[: ver_w]
         src = (r.get("source") or "")[: src_w]
         cnt = str(r.get("usage_count", 0))
-        print(f"| {name.ljust(name_w - 1)}| {ver.ljust(ver_w - 1)}| {src.ljust(src_w - 1)}| {cnt.rjust(cnt_w - 2)} |")
+        print(f"| {name.ljust(name_w - 1)}| {rtype.ljust(type_w - 1)}| {ver.ljust(ver_w - 1)}| {src.ljust(src_w - 1)}| {cnt.rjust(cnt_w - 2)} |")
 
     print(sep)
-    print(f"{len(records)} skill(s)")
+    skills = sum(1 for r in records if r.get("type") == "skill")
+    ext = sum(1 for r in records if r.get("type") == "external_tool")
+    plugins = sum(1 for r in records if r.get("type") == "plugin")
+    print(f"{len(records)} tool(s) ({skills} skills, {ext} external tools, {plugins} plugins)")
 
 
 # ---------------------------------------------------------------------------
@@ -362,16 +559,26 @@ def cmd_find(keyword, index_path=None):
         print(f"No skills match '{keyword}'")
         return
 
-    print(f"Found {len(matches)} skill(s) matching '{keyword}':\n")
+    print(f"Found {len(matches)} tool(s) matching '{keyword}':\n")
     for r in matches:
         name = r.get("name", "?")
+        rtype = r.get("type", "skill")
         desc = (r.get("description") or "(no description)")[:120]
         tags = r.get("tags") or []
         tag_str = f"  tags: [{', '.join(tags)}]" if tags else ""
-        print(f"  {name}")
+        extra = ""
+        if rtype == "plugin":
+            cmds = list(r.get("subcommands", {}).keys())
+            extra = f"  commands: {', '.join(cmds[:4])}{'...' if len(cmds) > 4 else ''}"
+        elif rtype == "external_tool":
+            cmds = list(r.get("subcommands", {}).keys())
+            extra = f"  commands: {', '.join(cmds[:4])}{'...' if len(cmds) > 4 else ''}"
+        print(f"  [{rtype}] {name}")
         print(f"    {desc}")
         if tag_str:
             print(tag_str)
+        if extra:
+            print(extra)
         print()
 
 
@@ -386,6 +593,7 @@ def cmd_diagnose(index_path=None):
     with open(expanded, "r", encoding="utf-8") as f:
         records = json.load(f)
 
+    records = [r for r in records if r.get("type") == "skill"]
     if not records:
         print("(empty index)")
         return
@@ -439,6 +647,53 @@ def cmd_diagnose(index_path=None):
 # ---------------------------------------------------------------------------
 
 
+def scan_external(config_path=None):
+    """Scan only external tools and update index (merge with existing skills)."""
+    cfg = load_config(config_path)
+    ext_dir = os.path.expanduser(cfg.get("external_tools_dir", DEFAULT_EXTERNAL_TOOLS_DIR))
+    index_path = os.path.expanduser(cfg.get("index_path", DEFAULT_INDEX_PATH))
+
+    print(f"[scan-external] External tools dir: {ext_dir}", file=sys.stderr)
+    print(f"[scan-external] Index: {index_path}", file=sys.stderr)
+
+    # Load old index
+    old_index = load_old_index(index_path)
+
+    # Keep existing skills, replace external tools and plugins
+    existing_skills = []
+    for r in old_index.values():
+        if r.get("type") not in ("external_tool", "plugin"):
+            existing_skills.append(r)
+
+    # Discover external tools and plugins from descriptors
+    ext_files = discover_external_tools(ext_dir)
+    ext_records = []
+    for fp in ext_files:
+        rec = load_tool_descriptor(fp)
+        if rec is None:
+            continue
+        old_rec = old_index.get(rec["name"])
+        if old_rec:
+            rec["usage_count"] = old_rec.get("usage_count", 0)
+        ext_records.append(rec)
+        rtype = rec.get("type", "tool")
+        print(f"  [{rtype}] {rec['name']}", file=sys.stderr)
+
+    records = existing_skills + ext_records
+
+    # Write index
+    _ensure_sebastian_dir()
+    with open(index_path, "w", encoding="utf-8") as f:
+        json.dump(records, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+    skills = sum(1 for r in existing_skills if r.get("type") == "skill")
+    ext_tools = sum(1 for r in ext_records if r.get("type") == "external_tool")
+    plugins = sum(1 for r in ext_records if r.get("type") == "plugin")
+    print(f"\n[scan-external] Done. {len(records)} tool(s) in index ({skills} skills, {ext_tools} external tools, {plugins} plugins).", file=sys.stderr)
+    return records
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__.strip())
@@ -448,6 +703,19 @@ def main():
 
     if command == "--scan":
         scan()
+    elif command == "--scan-external":
+        scan_external()
+    elif command == "--scan-plugins":
+        print("[scan-plugins] Discovering installed plugins from cache...", file=sys.stderr)
+        plugins = discover_installed_plugins()
+        if not plugins:
+            print("  No plugins found in cache.", file=sys.stderr)
+        for p in plugins:
+            print(f"  [plugin] {p['name']} v{p['version']} ({p['marketplace']})", file=sys.stderr)
+            if p['has_skills']:
+                for s in p['skill_names']:
+                    print(f"    skill: {s}", file=sys.stderr)
+        print(f"\n[scan-plugins] Done. {len(plugins)} plugin(s) found.", file=sys.stderr)
     elif command == "--list":
         cmd_list()
     elif command == "--find":
@@ -459,7 +727,7 @@ def main():
         cmd_diagnose()
     else:
         print(f"Unknown command: {command}")
-        print("Available: --scan, --list, --find <keyword>, --diagnose")
+        print("Available: --scan, --scan-external, --scan-plugins, --list, --find <keyword>, --diagnose")
         sys.exit(1)
 
 

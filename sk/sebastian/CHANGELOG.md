@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.5.0 (2026-07-15)
+
+- 新增「外部工具 (external_tool)」类型 — 独立项目脚本/工具集索引与路由
+- 新增「Plugin (plugin)」类型 — Claude Code 插件索引与路由
+- 外部工具/插件关键词触发：exact_keywords 直接 EXACT，indirect_keywords 反问确认
+- scan.py 扩展：支持 plugin 类型记录、自动发现已安装插件缓存
+- 新增模板 H（求职工作流 career-ops）、模板 I（网文创作工作流 webnovel-writer）
+- 新增 `--scan-plugins` 命令查看已安装插件
+- 新增 `external-tools/` 目录，统一存放外部工具和插件描述文件
+
 ## 2.4.0 (2026-07-03)
 
 - 新增自建技能 rpg-loop 即时记录机制

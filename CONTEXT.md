@@ -6,7 +6,7 @@
 
 ## 核心理念
 
-所有可调用的能力单元（Skills / MCP / 插件 / CLI / Agent）统一视为 **工具 (Tool)**，由 Sebastian 统一发现、管理和编排。
+所有可调用的能力单元（Skills / 外部工具 / MCP / 插件 / CLI / Agent）统一视为 **工具 (Tool)**，由 Sebastian 统一发现、管理和编排。
 
 ## 核心职责
 
@@ -15,7 +15,7 @@
 
 ### 第一版范围
 
-只管理 Skills，后续版本再叠加 MCP / Agent / CLI 工具。
+管理 Skills + **外部工具（External Tools）**，后续版本再叠加 MCP / Agent / CLI 工具。
 
 ## 跨平台兼容
 
@@ -56,6 +56,9 @@ D:\Projects\Sebastian-agent\     ← 项目源码根目录
 ├── sk/
 │   └── sebastian/
 │       └── SKILL.md              ← Sebastian 的 Skill 源码
+├── external-tools/               ← 外部工具/插件描述文件（源码）
+│   ├── career-ops.json           ← career-ops 外部工具描述
+│   └── webnovel-writer.json      ← webnovel-writer 插件描述
 ├── scripts/
 │   └── scan.py                   ← 索引扫描脚本（开发版）
 └── install.sh                    ← 安装脚本（部署到 ~/.claude/skills/ + ~/.sebastian/）
@@ -69,11 +72,14 @@ D:\Projects\Sebastian-agent\     ← 项目源码根目录
 | `~/.sebastian/scan.py` | 扫描脚本（install 时部署） |
 | `~/.sebastian/index.json` | 工具元数据索引 |
 | `~/.sebastian/config.json` | 路径配置 |
+| `~/.sebastian/external-tools/` | 外部工具/插件描述文件 |
 
 ### 扫描路径
 
 - `~/.claude/skills/`
 - `~/.agents/skills/`
+- `~/.sebastian/external-tools/` — 外部工具/插件描述文件（JSON 格式）
+- `~/.claude/plugins/cache/` — 已安装的插件缓存（`--scan-plugins` 自动发现）
 
 ### 扫描方式
 
@@ -137,6 +143,86 @@ update_method:
 | `external_url` | 外部来源地址 |
 | `update_method` | 外部库的更新方法 |
 | `usage_count` | 被管家调用的次数，每次调用 +1，由 Sebastian 自动维护 |
+
+### 外部工具索引字段
+
+外部工具是独立项目中的脚本/工具集，不以 SKILL.md 形式存在。描述文件存放在 `~/.sebastian/external-tools/{name}.json`，由 `scan.py --scan` 自动发现并加入索引。
+
+```json
+{
+  "name": "career-ops",
+  "type": "external_tool",
+  "path": "D:/Projects/career-ops",
+  "description": "AI 求职自动化工具集",
+  "version": "1.20.0",
+  "tags": ["job-search", "career"],
+  "capabilities": "职位搜索、评估、简历生成、追踪",
+  "scenarios": "找工作、求职、面试准备",
+  "keywords": ["找工作", "求职", "job", "career"],
+  "invoke_type": "command",
+  "invoke_cwd": "D:/Projects/career-ops",
+  "invoke_template": "node {{script}}",
+  "subcommands": {
+    "scan": "搜索职位 — node scan.mjs",
+    "pdf": "生成简历 PDF — node generate-pdf.mjs"
+  },
+  "trigger_confidence": {
+    "exact_keywords": ["找工作", "求职"],
+    "indirect_keywords": ["跳槽", "招聘"]
+  },
+  "source": "external",
+  "usage_count": 0
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `type` | `external_tool` 标记外部工具 |
+| `keywords` | 触发关键词列表，用于路由匹配 |
+| `invoke_cwd` | 执行命令的工作目录 |
+| `invoke_template` | 命令模板（`{{script}}` 会被替换） |
+| `subcommands` | 子命令列表：名称 → 描述/调用方式 |
+| `trigger_confidence` | 两级关键词：`exact_keywords` 直接触发，`indirect_keywords` 反问确认 |
+
+### Plugin 索引字段
+
+Plugin 是通过 Claude Code 插件市场安装的插件，描述文件存放在 `~/.sebastian/external-tools/{name}.json`，`type` 设为 `"plugin"`。
+
+```json
+{
+  "name": "webnovel-writer",
+  "type": "plugin",
+  "version": "6.2.1",
+  "path": "~/.claude/plugins/cache/.../6.2.1",
+  "description": "长篇网文创作系统",
+  "tags": ["webnovel", "writing", "网文"],
+  "capabilities": "初始化、规划、写作、审查、查询、学习、健康检查、仪表盘",
+  "scenarios": "写小说、网文创作、故事规划",
+  "keywords": ["写小说", "网文", "创作"],
+  "invoke_type": "plugin_command",
+  "invoke_prefix": "/webnovel-",
+  "subcommands": {
+    "webnovel-init": "初始化小说项目",
+    "webnovel-write": "写作章节"
+  },
+  "trigger_confidence": {
+    "exact_keywords": ["写小说", "网文"],
+    "indirect_keywords": ["写作", "创作"]
+  },
+  "source": "plugin",
+  "usage_count": 0
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `type` | `plugin` 标记为 Claude Code 插件 |
+| `invoke_type` | `plugin_command` 表示通过 `/` 斜杠命令调用 |
+| `invoke_prefix` | 斜杠命令前缀（如 `/webnovel-`） |
+| `keywords` | 触发关键词列表，用于路由匹配 |
+| `subcommands` | 子命令列表：名称 → 描述 |
+| `trigger_confidence` | 两级关键词：`exact_keywords` 直接触发，`indirect_keywords` 反问确认 |
+| `source` | `plugin` 标记为插件市场来源 |
 
 ## 进化层次模型
 
