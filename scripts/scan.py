@@ -20,20 +20,58 @@ import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-#  Default paths
+#  Sandbox-aware path resolution
+#  Claude Code sandbox overrides HOME/USERPROFILE to a temp shadow directory.
+#  We detect this and fall back to the real user home so ~/.sebastian/ data
+#  survives across sessions.
 # ---------------------------------------------------------------------------
-DEFAULT_CONFIG_PATH = os.path.expanduser("~/.sebastian/config.json")
-DEFAULT_INDEX_PATH = os.path.expanduser("~/.sebastian/index.json")
-DEFAULT_SKILL_PATHS = [
-    os.path.expanduser("~/.claude/skills"),
-    os.path.expanduser("~/.agents/skills"),
-]
-DEFAULT_EXTERNAL_TOOLS_DIR = os.path.expanduser("~/.sebastian/external-tools")
-PLUGIN_CACHE_DIR = os.path.expanduser("~/.claude/plugins/cache")
+
+
+def _real_home():
+    """Resolve the real user home directory, accounting for sandbox shadow dirs.
+
+    Priority:
+    1. SEBASTIAN_HOME env var (explicit override)
+    2. Current HOME if ~/.sebastian/ exists there (normal case)
+    3. Windows: construct from USERNAME (sandbox fallback)
+    4. Fall back to HOME
+    """
+    # 1. Explicit override
+    env_home = os.environ.get("SEBASTIAN_HOME")
+    if env_home:
+        return os.path.abspath(env_home)
+
+    home = os.path.expanduser("~")
+
+    # 2. Current HOME already has .sebastian → use it
+    if os.path.isdir(os.path.join(home, ".sebastian")):
+        return home
+
+    # 3. Windows sandbox: USERNAME is not overridden by sandbox
+    if sys.platform == "win32" or os.name == "nt":
+        username = os.environ.get("USERNAME")
+        if username:
+            real_home = f"C:\\Users\\{username}"
+            if os.path.isdir(os.path.join(real_home, ".sebastian")):
+                return real_home
+
+    # 4. Fall back
+    return home
+
+
+def _sebastian_dir():
+    return os.path.join(_real_home(), ".sebastian")
+
 
 # ---------------------------------------------------------------------------
-#  Config
+#  Default paths (resolved lazily so sandbox detection runs at call time)
 # ---------------------------------------------------------------------------
+
+DEFAULT_SKILL_PATHS = [
+    "~/.claude/skills",
+    "~/.agents/skills",
+]
+PLUGIN_CACHE_DIR = "~/.claude/plugins/cache"
 
 DEFAULT_CONFIG = {
     "skill_paths": ["~/.claude/skills", "~/.agents/skills"],
@@ -43,15 +81,38 @@ DEFAULT_CONFIG = {
 }
 
 
+def _default_config_path():
+    return os.path.join(_sebastian_dir(), "config.json")
+
+
+def _default_index_path():
+    return os.path.join(_sebastian_dir(), "index.json")
+
+
+def _default_external_tools_dir():
+    return os.path.join(_sebastian_dir(), "external-tools")
+
+
+def _resolve_expanduser(path):
+    """Like os.path.expanduser but accounts for sandbox shadow dirs."""
+    if path.startswith("~/"):
+        return path.replace("~/", _real_home() + "/", 1)
+    if path.startswith("~"):
+        return path.replace("~", _real_home(), 1)
+    return os.path.expanduser(path)
+
+
 def _ensure_sebastian_dir():
-    """Create ~/.sebastian/ if it does not exist."""
-    Path(os.path.expanduser("~/.sebastian")).mkdir(parents=True, exist_ok=True)
+    """Create ~/.sebastian/ in the real home if it does not exist."""
+    Path(_sebastian_dir()).mkdir(parents=True, exist_ok=True)
 
 
 def load_config(config_path=None):
     """Load config from disk or create default."""
-    path = config_path or DEFAULT_CONFIG_PATH
-    expanded = os.path.expanduser(path)
+    if config_path:
+        expanded = _resolve_expanduser(config_path)
+    else:
+        expanded = os.path.join(_sebastian_dir(), "config.json")
 
     if not os.path.exists(expanded):
         print(f"[config] {expanded} not found, creating default.", file=sys.stderr)
@@ -70,9 +131,9 @@ def load_config(config_path=None):
 
 def save_config(cfg, path=None):
     """Write config to disk."""
-    p = path or DEFAULT_CONFIG_PATH
+    p = path or _default_config_path()
     _ensure_sebastian_dir()
-    with open(os.path.expanduser(p), "w", encoding="utf-8") as f:
+    with open(p, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
         f.write("\n")
 
@@ -256,7 +317,7 @@ def discover_skill_files(skill_paths):
     """Find all SKILL.md files under the given directories."""
     files = []
     for sp in skill_paths:
-        expanded = os.path.expanduser(sp)
+        expanded = _resolve_expanduser(sp)
         if not os.path.isdir(expanded):
             continue
         for root, _dirs, fnames in os.walk(expanded):
@@ -272,7 +333,7 @@ def discover_skill_files(skill_paths):
 
 def discover_external_tools(external_tools_dir):
     """Find all external tool JSON descriptors under the given directory."""
-    expanded = os.path.expanduser(external_tools_dir)
+    expanded = _resolve_expanduser(external_tools_dir)
     if not os.path.isdir(expanded):
         return []
     files = sorted(
@@ -321,7 +382,7 @@ def load_tool_descriptor(filepath):
 
 def get_plugin_cache_path(plugin_name):
     """Find the latest version cache path for a given plugin by scanning cache."""
-    cache_dir = PLUGIN_CACHE_DIR
+    cache_dir = _resolve_expanduser(PLUGIN_CACHE_DIR)
     if not os.path.isdir(cache_dir):
         return None
 
@@ -346,7 +407,7 @@ def get_plugin_cache_path(plugin_name):
 
 def discover_installed_plugins():
     """Auto-discover installed plugins from Claude Code cache directory."""
-    cache_dir = PLUGIN_CACHE_DIR
+    cache_dir = _resolve_expanduser(PLUGIN_CACHE_DIR)
     if not os.path.isdir(cache_dir):
         return []
 
@@ -381,9 +442,9 @@ def discover_installed_plugins():
 def scan(config_path=None):
     """Full scan: discover skills + external tools, parse, merge, write index."""
     cfg = load_config(config_path)
-    skill_paths = [os.path.expanduser(p) for p in cfg.get("skill_paths", [])]
-    ext_dir = os.path.expanduser(cfg.get("external_tools_dir", DEFAULT_EXTERNAL_TOOLS_DIR))
-    index_path = os.path.expanduser(cfg.get("index_path", DEFAULT_INDEX_PATH))
+    skill_paths = [_resolve_expanduser(p) for p in cfg.get("skill_paths", [])]
+    ext_dir = _resolve_expanduser(cfg.get("external_tools_dir", "~/.sebastian/external-tools"))
+    index_path = _resolve_expanduser(cfg.get("index_path", "~/.sebastian/index.json"))
 
     print(f"[scan] Skills paths: {skill_paths}", file=sys.stderr)
     print(f"[scan] External tools: {ext_dir}", file=sys.stderr)
@@ -448,7 +509,7 @@ def scan(config_path=None):
     from datetime import datetime, timezone
 
     cfg["last_scan"] = datetime.now(timezone.utc).isoformat()
-    save_config(cfg, config_path or DEFAULT_CONFIG_PATH)
+    save_config(cfg, config_path or _default_config_path())
 
     skills = sum(1 for r in records if r.get('type') == 'skill')
     ext_tools = sum(1 for r in records if r.get('type') == 'external_tool')
@@ -481,8 +542,8 @@ def load_old_index(index_path):
 
 def cmd_list(index_path=None):
     """Print a summary table of all indexed skills."""
-    path = index_path or DEFAULT_INDEX_PATH
-    expanded = os.path.expanduser(path)
+    path = index_path or _default_index_path()
+    expanded = _resolve_expanduser(path)
     if not os.path.exists(expanded):
         print("Index not found. Run --scan first.", file=sys.stderr)
         return
@@ -534,13 +595,12 @@ def cmd_list(index_path=None):
 
 def cmd_find(keyword, index_path=None):
     """Search index by name/tags/capabilities/scenarios."""
-    path = index_path or DEFAULT_INDEX_PATH
-    expanded = os.path.expanduser(path)
-    if not os.path.exists(expanded):
+    path = _resolve_expanduser(index_path or _default_index_path())
+    if not os.path.exists(path):
         print("Index not found. Run --scan first.", file=sys.stderr)
         return
 
-    with open(expanded, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
         records = json.load(f)
 
     kw = keyword.lower()
@@ -584,13 +644,12 @@ def cmd_find(keyword, index_path=None):
 
 def cmd_diagnose(index_path=None):
     """Print index health report."""
-    path = index_path or DEFAULT_INDEX_PATH
-    expanded = os.path.expanduser(path)
-    if not os.path.exists(expanded):
+    path = _resolve_expanduser(index_path or _default_index_path())
+    if not os.path.exists(path):
         print("Index not found. Run --scan first.", file=sys.stderr)
         return
 
-    with open(expanded, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
         records = json.load(f)
 
     records = [r for r in records if r.get("type") == "skill"]
@@ -650,8 +709,8 @@ def cmd_diagnose(index_path=None):
 def scan_external(config_path=None):
     """Scan only external tools and update index (merge with existing skills)."""
     cfg = load_config(config_path)
-    ext_dir = os.path.expanduser(cfg.get("external_tools_dir", DEFAULT_EXTERNAL_TOOLS_DIR))
-    index_path = os.path.expanduser(cfg.get("index_path", DEFAULT_INDEX_PATH))
+    ext_dir = _resolve_expanduser(cfg.get("external_tools_dir", "~/.sebastian/external-tools"))
+    index_path = _resolve_expanduser(cfg.get("index_path", "~/.sebastian/index.json"))
 
     print(f"[scan-external] External tools dir: {ext_dir}", file=sys.stderr)
     print(f"[scan-external] Index: {index_path}", file=sys.stderr)

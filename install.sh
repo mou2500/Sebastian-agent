@@ -13,8 +13,19 @@ SKILL_SRC="sk/sebastian/SKILL.md"
 SCAN_SRC="scripts/scan.py"
 EXT_DIR_SRC="external-tools"
 
-SKILL_DST="$HOME/.claude/skills/sebastian/SKILL.md"
-SEBASTIAN_DIR="$HOME/.sebastian"
+# 检测真实用户目录（避开 Claude Code 沙箱的临时 HOME）
+if [ -n "${SEBASTIAN_HOME:-}" ]; then
+  REAL_HOME="$SEBASTIAN_HOME"
+elif [ -d "$HOME/.sebastian" ]; then
+  REAL_HOME="$HOME"
+elif [ -n "${USERNAME:-}" ] && [ -d "/c/Users/$USERNAME/.sebastian" ]; then
+  REAL_HOME="/c/Users/$USERNAME"
+else
+  REAL_HOME="$HOME"
+fi
+
+SKILL_DST="$REAL_HOME/.claude/skills/sebastian/SKILL.md"
+SEBASTIAN_DIR="$REAL_HOME/.sebastian"
 SCAN_DST="$SEBASTIAN_DIR/scan.py"
 CONFIG_DST="$SEBASTIAN_DIR/config.json"
 EXT_DIR_DST="$SEBASTIAN_DIR/external-tools"

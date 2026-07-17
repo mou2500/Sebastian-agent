@@ -1,7 +1,7 @@
 ---
 name: sebastian
 description: 工程管家 v2 — 分析任务、加权匹配 skills、编排多步骤工作流、管理工具索引
-version: 2.5.0
+version: 2.5.1
 tags: [orchestration, management, meta, workflow]
 capabilities: 意图理解（Phase 0 流水线）、任务分析与拆解、skills 加权匹配与三级定级、**外部工具匹配与关键词触发**、多步骤工作流编排、工具索引管理与健康诊断、工作流复盘与学习日志
 scenarios: 复杂多步骤任务、技能发现与管理、工作流规划、索引健康诊断、学习复盘、**外部工具路由与触发**
@@ -27,12 +27,18 @@ Sebastian 是一个元技能（meta-skill），负责：
 ## 命令参考
 
 > **⚠️ 沙箱路径兼容性**
-> 在 Claude Code 等沙箱环境中，`~` 可能解析为临时影子目录而非真实用户目录。
-> `scan.py` 已内置自动探测逻辑（按 `SEBASTIAN_BASE_DIR` 环境变量 → `USERPROFILE`
-> → `HOME` 转换 → 实际含 `.claude/skills` 的目录 顺序回退），
-> 可直接运行无需手动指定路径。如果仍失败，可显式设置：
-> ```bash
-> SEBASTIAN_BASE_DIR=/path/to/your/skills python3 scan.py --scan
+> Claude Code 沙箱会把 `HOME` 改为临时影子目录（如 `/tmp/codepilot-shadow-xxx`），
+> 导致 `~/.sebastian/` 解析到错误位置。
+>
+> **修复方案：** `scan.py` 已内置自动探测逻辑，按以下优先级找到真实用户目录：
+> 1. `SEBASTIAN_HOME` 环境变量（显式指定）
+> 2. 当前 `HOME` 如果其中有 `.sebastian/`（正常模式）
+> 3. Windows: 用 `USERNAME` 构造 `C:\Users\{USERNAME}`（沙箱回退）
+> 4. 回退到当前 `HOME`
+>
+> 所有命令中的路径均使用以下绝对路径（沙箱内外一致）：
+> ```
+> /c/Users/mou25/.sebastian/
 > ```
 
 ### 1. `/sebastian <任务描述>` — 核心编排
@@ -48,7 +54,7 @@ Sebastian 是一个元技能（meta-skill），负责：
 0c. **澄清门** — 置信度非 high 或 top-1 概率 < 80% 时，生成最多 2 个澄清问题，用户回答后更新概率
 
 ### Phase 1-9：技能匹配与编排（改进）
-1. **读取索引** — 读取 `~/.sebastian/index.json`
+1. **读取索引** — 读取 `/c/Users/mou25/.sebastian/index.json`
 2. **加权匹配** — 以用户请求原文 + Intent.coreType + Intent.deliveryFormat + Intent.audience 为输入，按 name/tags/description/capabilities/scenarios 多字段权重搜索
 3. **三级定级** — 将匹配结果标记为 EXACT / INDIRECT / NOMATCH
 4. **阈值熔断** — 根据置信度决定行为：
@@ -102,7 +108,7 @@ Sebastian 是一个元技能（meta-skill），负责：
   - **获得用户授权后再继续**
   - **不得擅自执行计划外的技术方案（如换工具链、安装新依赖等）**
 - 所有步骤完成后，给出最终摘要，包括产出的文件/变更
-- **工作流完成后，自动追加一条 lessons 记录到 `~/.sebastian/lessons.json`**
+- **工作流完成后，自动追加一条 lessons 记录到 `/c/Users/mou25/.sebastian/lessons.json`**
 - **自建技能记录要求：**
   - 凡是在工作流中用到的**自建技能**（包括管家自己 sebastian），每步执行完毕后立即调用 `/skill-rpg-loop` 记录使用
   - 自建技能列表：`sebastian`、`bifeng`、`novel-learner`、`panel-of-experts`、`shuixian`、`text2img`、`img2img`、`image-recognition`、`skill-rpg-loop`
@@ -176,7 +182,7 @@ Intent {
 
 **流程：**
 
-1. 运行 `python3 ~/.sebastian/scan.py --scan`
+1. 运行 `python3 /c/Users/mou25/.sebastian/scan.py --scan`
 2. 展示扫描结果摘要（新增/更新/总数 + 索引健康度报告）
 3. 如果用户有疑问，可使用 `--list` 或 `--find` 进一步查看
 
@@ -186,7 +192,7 @@ Intent {
 
 **流程：**
 
-1. 运行 `python3 ~/.sebastian/scan.py --list`
+1. 运行 `python3 /c/Users/mou25/.sebastian/scan.py --list`
 2. 以表格展示所有已索引技能
 
 ---
@@ -195,7 +201,7 @@ Intent {
 
 **流程：**
 
-1. 运行 `python3 ~/.sebastian/scan.py --find <keyword>`
+1. 运行 `python3 /c/Users/mou25/.sebastian/scan.py --find <keyword>`
 2. 展示匹配结果及描述
 
 ---
@@ -204,7 +210,7 @@ Intent {
 
 **流程：**
 
-1. 运行 `python3 ~/.sebastian/scan.py --diagnose`
+1. 运行 `python3 /c/Users/mou25/.sebastian/scan.py --diagnose`
 2. 输出索引健康度报告：总计 / 完整 / 基本 / 稀疏 各多少
 3. 列出字段缺失最严重的技能
 
@@ -214,7 +220,7 @@ Intent {
 
 **流程：**
 
-1. 读取 `~/.sebastian/lessons.json`
+1. 读取 `/c/Users/mou25/.sebastian/lessons.json`
 2. 汇总统计：总执行次数、各 skill 使用次数、XP 排名
 3. 推荐 XP ≥ 5 的 skill 走 `/skill-rpg-loop` 升级
 4. 展示近期 lessons 摘要
@@ -687,14 +693,14 @@ Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 
 
 每次工作流执行时，Sebastian 需要做两件事：
 
-1. **Lessons 记录（内部复盘用）** → 写入 `~/.sebastian/lessons.json`
+1. **Lessons 记录（内部复盘用）** → 写入 `/c/Users/mou25/.sebastian/lessons.json`
 2. **rpg-loop 记录（XP 经验值用）** → 调用 `/skill-rpg-loop` 记录每步使用
 
 两者分工：Lessons 记录整个工作流的复盘信息，rpg-loop 记录每个自建技能的 XP 用于升级。
 
 ### Lessons 记录格式
 
-工作流执行完毕后（所有步骤完成或用户终止），Sebastian 自动追加一条记录到 `~/.sebastian/lessons.json`：
+工作流执行完毕后（所有步骤完成或用户终止），Sebastian 自动追加一条记录到 `/c/Users/mou25/.sebastian/lessons.json`：
 
 ```json
 {

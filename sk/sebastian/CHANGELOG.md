@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.5.1 (2026-07-17)
+
+- **修复** scan.py 沙箱路径兼容性 — 新增 `_real_home()` 自动检测真实用户目录，避开 Claude Code 临时 HOME
+- **修复** SKILL.md 全部 `~/.sebastian/` 引用替换为绝对路径，避免沙箱解析错误
+- **修复** install.sh 新增 `SEBASTIAN_HOME` 环境变量支持和真实目录自动检测
+- **修复** SKILL.md/install.sh 中命令路径改为直接使用 `/c/Users/mou25/.sebastian/`（沙箱内外一致）
+
 ## 2.5.0 (2026-07-15)
 
 - 新增「外部工具 (external_tool)」类型 — 独立项目脚本/工具集索引与路由
