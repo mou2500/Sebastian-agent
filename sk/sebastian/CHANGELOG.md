@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.6.0 (2026-09-07)
+
+P0 进化(借鉴 ACE: 路由可评测 + 记录压缩治理)
+
+- **新增 `/sebastian bench` 路由评测基准** — 固定用例集量化匹配质量:
+  - 新增 `scripts/bench.py`: 确定性校验(validate, 先于模型判断) + 批量打分(score) + 回归对比(histories)
+  - 用例格式: layer/scenario/prompt/expected_skills/expected_template/expected_level(EXACT|NOMATCH)
+  - 模型单次批量推理输出预测 JSON, 脚本算 hit@1/hit@3/分层报告/模板命中率
+  - 回归告警: 相比上次基线下降 ≥3pt 或 10%; 绝对阈值 <80%
+  - 预测与历史存档于 `~/.sebastian/bench-runs/` 与 `bench-history.json`
+  - 新增种子数据集 `sk/sebastian/bench-cases.json` (28 例, 覆盖模板 A/E/G/H/I/J、关键词触发、NOMATCH、技能名边界)
+- **新增 `/sebastian compact lessons` 锚定摘要归档** — 解决 lessons.json 无界增长:
+  - 新增 `scripts/compact_lessons.py`: status(阈值 40 警告 / 50 上限) / cut(超限记录按主技能分桶) / merge(增量并入归档)
+  - 归档文件 `lessons-archive.json`: 固定章节摘要(decisions/failures/stats), 技能名与路径逐字保留
+  - 同 skill+period 摘要只做增量扩展, 绝不整体重写(锚定迭代原则)
+- `/sebastian review` 更新: 先跑 `--status`, 统计叠加归档摘要
+- SKILL.md 文档: 新增命令 7/8, lessons 章节加入成长治理说明
+
 ## 2.5.1 (2026-07-17)
 
 - **修复** scan.py 沙箱路径兼容性 — 新增 `_real_home()` 自动检测真实用户目录，避开 Claude Code 临时 HOME

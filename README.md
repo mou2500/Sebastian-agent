@@ -4,7 +4,7 @@
   <img src="assets/Sebastian_logo.svg" alt="Sebastian Logo" width="400"/>
 </p>
 
-> 版本 2.5.0 | 作者：[何牟](https://github.com/mou2500)
+> 版本 2.6.0 | 作者：[何牟](https://github.com/mou2500)
 
 Sebastian 是一个**元技能（meta-skill）**，负责编排多步骤工作流。它是调度员，不是执行者。
 
@@ -16,12 +16,15 @@ Sebastian-agent/
 │   └── Sebastian_logo.svg   ← Logo（矢量）
 ├── sk/sebastian/
 │   ├── SKILL.md          ← 技能本体
-│   └── CHANGELOG.md      ← 更新日志
+│   ├── CHANGELOG.md      ← 更新日志
+│   └── bench-cases.json  ← 路由评测种子用例集
 ├── external-tools/       ← 外部工具/插件描述文件
 │   ├── career-ops.json   ← 求职自动化工具
 │   └── webnovel-writer.json ← 网文创作插件
 ├── scripts/
 │   ├── scan.py           ← 技能/工具/插件扫描索引
+│   ├── bench.py          ← 路由评测: 校验/打分/回归告警
+│   ├── compact_lessons.py ← 学习日志锚定压缩归档
 │   └── enrich_frontmatter.py  ← 元数据增强
 ├── install.sh            ← 部署脚本
 ├── CONTEXT.md            ← 项目上下文
@@ -39,6 +42,8 @@ Sebastian-agent/
 /sebastian find <关键词>      # 搜索技能
 /sebastian diagnose index    # 索引健康诊断
 /sebastian review            # 审查学习日志
+/sebastian bench             # 路由评测基准（量化匹配质量）
+/sebastian compact lessons   # 压缩学习日志（锚定摘要归档）
 ```
 
 ## 安装
@@ -59,8 +64,10 @@ bash install.sh
 - **外部工具路由** — 关键词触发独立项目脚本（career-ops 求职工具）
 - **Plugin 路由** — 关键词触发 Claude Code 插件技能（webnovel-writer 网文创作）
 - **工具索引管理** — 统一索引 skill / external_tool / plugin 三种类型
+- **路由评测基准** — 固定用例集量化匹配质量（hit@1/hit@3/分层报告/回归告警）
 - **8 种工作流模板** — 灵活编排多步骤任务
 - **双轨记录** — Lessons 复盘 + rpg-loop XP 经验值
+- **记录锚定压缩** — lessons 超阈值后按技能分桶归档，固定章节增量摘要
 - **索引健康诊断** — 技能索引质量检查与修复
 
 ## 许可

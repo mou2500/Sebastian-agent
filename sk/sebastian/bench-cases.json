@@ -1,0 +1,227 @@
+{
+  "meta": {
+    "schema": 1,
+    "updated": "2026-09-07",
+    "source": "sk/sebastian/bench-cases.json (仓库种子), 安装至 ~/.sebastian/bench.json 后可本地增删",
+    "scoring": "EXACT case: hit@1 = matched_skills[0] ∈ expected_skills; NOMATCH case: hit = matched_skills 为空"
+  },
+  "cases": [
+    {
+      "id": 1,
+      "layer": "single-output",
+      "scenario": "单技能直接产出: logo",
+      "prompt": "给我们的新茶饮品牌设计一个 logo",
+      "expected_skills": ["logo-generator"],
+      "note": "harness 索引名 logo-generator (非 logo-generator-skill)"
+    },
+    {
+      "id": 2,
+      "layer": "single-output",
+      "scenario": "单技能直接产出: 社交卡片",
+      "prompt": "帮我做一张新品发布的社交分享卡片",
+      "expected_skills": ["guizang-social-card-skill"]
+    },
+    {
+      "id": 3,
+      "layer": "composite",
+      "scenario": "品牌套件(复合产出)",
+      "prompt": "出一套完整的品牌视觉识别基础套件",
+      "expected_skills": ["brandkit"]
+    },
+    {
+      "id": 4,
+      "layer": "multi-step",
+      "scenario": "test-prompts#1: 模板 E 视觉多步编排",
+      "prompt": "帮我为一个产品发布会设计 landing page 和社交分享卡片，需要保持视觉一致",
+      "expected_skills": ["guizang-ppt-skill"],
+      "expected_template": "E",
+      "note": "模板 E: 主产出 landing(网页 PPT)→guizang-ppt-skill, 再排 social card + brandkit; top-1 须为 guizang-ppt-skill"
+    },
+    {
+      "id": 5,
+      "layer": "single-output",
+      "scenario": "Plugin 关键词触发 EXACT: 写网文",
+      "prompt": "我想写一部玄幻网文，先帮我规划一下开篇几章的节奏",
+      "expected_skills": ["webnovel-writer"],
+      "expected_template": "I",
+      "note": "exact_keywords: 写小说/网文 → 直接 EXACT 走 webnovel-plan"
+    },
+    {
+      "id": 6,
+      "layer": "single-output",
+      "scenario": "反例: 营销文案不触发 webnovel",
+      "prompt": "帮我写一份新品上市的营销文案",
+      "expected_skills": ["bifeng"],
+      "note": "核心是文案写作, 不是小说创作; 不可路由到 webnovel-writer"
+    },
+    {
+      "id": 7,
+      "layer": "multi-step",
+      "scenario": "test-prompts#3: 模板 G 内容→格式流水线",
+      "prompt": "写一份对公营销文案，最后要输出成 .docx 格式",
+      "expected_skills": ["bifeng"],
+      "expected_template": "G",
+      "note": "Scope Guard: coreType=copywriting ≠ deliveryFormat=docx → 内容层 bifeng 先行, 形式层 docx"
+    },
+    {
+      "id": 8,
+      "layer": "single-output",
+      "scenario": "纯格式操作直达 docx",
+      "prompt": "把这份银行合作建议书按公文体例重新排版成 docx",
+      "expected_skills": ["docx"],
+      "note": "只动格式不动文案 → 单步 docx, 不上模板 G"
+    },
+    {
+      "id": 9,
+      "layer": "multi-step",
+      "scenario": "模板 A: bug 调试(索引名 systematic-debugging)",
+      "prompt": "系统上线后接口响应突然变慢，帮我查查怎么回事",
+      "expected_skills": ["systematic-debugging"],
+      "expected_template": "A",
+      "note": "SKILL.md 模板 A 写作 diagnosing-bugs, 索引实际名 systematic-debugging — 以索引为准"
+    },
+    {
+      "id": 10,
+      "layer": "single-output",
+      "scenario": "多角色讨论(需求模糊)",
+      "prompt": "有三个功能方案拿不准，想从产品、技术、运营角度分别讨论一下",
+      "expected_skills": ["panel-of-experts"]
+    },
+    {
+      "id": 11,
+      "layer": "single-output",
+      "scenario": "外部工具关键词触发: 扫职位",
+      "prompt": "帮我扫一下最近一周有哪些合适的后端职位机会",
+      "expected_skills": ["career-ops"],
+      "expected_template": "H",
+      "note": "career-ops scan/pipeline 子命令"
+    },
+    {
+      "id": 12,
+      "layer": "single-output",
+      "scenario": "外部工具子命令: 简历导出 PDF",
+      "prompt": "把我更新后的简历导出成 PDF 文件",
+      "expected_skills": ["career-ops"],
+      "note": "career-ops pdf 子命令, 不是文案写作"
+    },
+    {
+      "id": 13,
+      "layer": "single-output",
+      "scenario": "边界: 简历内容润色走 bifeng 而非 career-ops",
+      "prompt": "帮我润色一下简历里项目经历部分的写法",
+      "expected_skills": ["bifeng"],
+      "note": "说的是简历文案/表达 → bifeng; 若说'生成简历 PDF/更新简历文件'才走 career-ops"
+    },
+    {
+      "id": 14,
+      "layer": "single-output",
+      "scenario": "外部工具: JD 评估",
+      "prompt": "帮我评估一下这份 JD 值不值得投（附 JD 内容）",
+      "expected_skills": ["career-ops"]
+    },
+    {
+      "id": 15,
+      "layer": "single-output",
+      "scenario": "外部工具: 面试准备",
+      "prompt": "下周面一家量化公司，帮我按岗位要求做面试准备",
+      "expected_skills": ["career-ops"]
+    },
+    {
+      "id": 16,
+      "layer": "single-output",
+      "scenario": "外部工具: 公司研究",
+      "prompt": "帮我深入调研一下这家准备面试的公司背景和业务",
+      "expected_skills": ["career-ops"]
+    },
+    {
+      "id": 17,
+      "layer": "multi-step",
+      "scenario": "lessons 模板 J: 照片→插画第三方环境编排",
+      "prompt": "帮我把这张街拍照片转成插画风格",
+      "expected_skills": ["street-photo-illustration"],
+      "expected_template": "J",
+      "note": "模板 J: 提示词层 street-photo-illustration → 执行 img2img → 增强可选识图; top-1 须为 street-photo-illustration"
+    },
+    {
+      "id": 18,
+      "layer": "single-output",
+      "scenario": "文生图",
+      "prompt": "画一张赛博朋克风格的城市夜景插画",
+      "expected_skills": ["text2img"]
+    },
+    {
+      "id": 19,
+      "layer": "single-output",
+      "scenario": "图生图",
+      "prompt": "用这张手绘草稿生成一张完整的上色图",
+      "expected_skills": ["img2img"]
+    },
+    {
+      "id": 20,
+      "layer": "single-output",
+      "scenario": "office 类: Word",
+      "prompt": "把这次评审会议的纪要整理成正式 Word 文档",
+      "expected_skills": ["docx"]
+    },
+    {
+      "id": 21,
+      "layer": "single-output",
+      "scenario": "office 类: 表格",
+      "prompt": "把这份季度销售数据做成分析表格",
+      "expected_skills": ["xlsx"]
+    },
+    {
+      "id": 22,
+      "layer": "single-output",
+      "scenario": "office 类: 演示",
+      "prompt": "给管理层做一份季度汇报 PPT",
+      "expected_skills": ["pptx"]
+    },
+    {
+      "id": 23,
+      "layer": "single-output",
+      "scenario": "网页设计 vs 网页 PPT 区分",
+      "prompt": "给我们的 SaaS 产品做一个正式的官网落地页",
+      "expected_skills": ["design-taste-frontend"],
+      "note": "官网网页(非演示 PPT) → design-taste-frontend, 不可误配 guizang-ppt-skill"
+    },
+    {
+      "id": 24,
+      "layer": "single-output",
+      "scenario": "长文排版",
+      "prompt": "把这篇 8000 字长文排版成适合公众号阅读的样式",
+      "expected_skills": ["kami"]
+    },
+    {
+      "id": 25,
+      "layer": "single-output",
+      "scenario": "写作风格学习",
+      "prompt": "读几章这位作者的小说，学习她的叙事风格",
+      "expected_skills": ["novel-learner"]
+    },
+    {
+      "id": 26,
+      "layer": "single-output",
+      "scenario": "Plugin 子命令: 故事设定查询",
+      "prompt": "查一下我网文项目里这个角色的设定和已埋伏笔",
+      "expected_skills": ["webnovel-writer"],
+      "note": "webnovel-query 子命令"
+    },
+    {
+      "id": 27,
+      "layer": "nomatch",
+      "scenario": "lessons 历史: 出行攻略 NOMATCH 回退",
+      "prompt": "帮我做一份从北京去阿那亚的出行攻略",
+      "expected_level": "NOMATCH",
+      "note": "无专用 skill → matched_skills 应为空, 走 Claude 通用能力 + anysearch"
+    },
+    {
+      "id": 28,
+      "layer": "nomatch",
+      "scenario": "技能发现: 引导 find-skills",
+      "prompt": "不知道有没有能帮我分析股权激励方案的技能，帮我搜搜看",
+      "expected_level": "NOMATCH",
+      "note": "先 NOMATCH 无匹配报告 → 建议 /find-skills (索引名 find-skills, SKILL.md 写作 find-skill)"
+    }
+  ]
+}

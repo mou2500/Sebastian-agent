@@ -1,7 +1,7 @@
 ---
 name: sebastian
-description: 工程管家 v2 — 分析任务、加权匹配 skills、编排多步骤工作流、管理工具索引
-version: 2.5.1
+description: 工程管家 v2 — 分析任务、加权匹配 skills、编排多步骤工作流、管理工具索引、路由评测与记录压缩
+version: 2.6.0
 tags: [orchestration, management, meta, workflow]
 capabilities: 意图理解（Phase 0 流水线）、任务分析与拆解、skills 加权匹配与三级定级、**外部工具匹配与关键词触发**、多步骤工作流编排、工具索引管理与健康诊断、工作流复盘与学习日志
 scenarios: 复杂多步骤任务、技能发现与管理、工作流规划、索引健康诊断、学习复盘、**外部工具路由与触发**
@@ -220,10 +220,84 @@ Intent {
 
 **流程：**
 
-1. 读取 `/c/Users/mou25/.sebastian/lessons.json`
-2. 汇总统计：总执行次数、各 skill 使用次数、XP 排名
-3. 推荐 XP ≥ 5 的 skill 走 `/skill-rpg-loop` 升级
-4. 展示近期 lessons 摘要
+1. 运行 `python3 /c/Users/mou25/.sebastian/compact_lessons.py --status`（先检查是否超阈值）
+2. 读取 `/c/Users/mou25/.sebastian/lessons.json` + `/c/Users/mou25/.sebastian/lessons-archive.json`（如存在）
+3. 汇总统计：总执行次数、各 skill 使用次数、XP 排名
+4. 推荐 XP ≥ 5 的 skill 走 `/skill-rpg-loop` 升级
+5. 展示近期 lessons 摘要 + 归档摘要
+
+---
+
+### 7. `/sebastian bench` — 路由评测基准
+
+用固定用例集量化路由匹配质量，检测索引/SKILL.md 规则变更后的回归。
+
+**数据文件：**
+- `/c/Users/mou25/.sebastian/bench.json` — 用例集（首次由仓库种子 `sk/sebastian/bench-cases.json` 部署，之后可本地增删）
+- `/c/Users/mou25/.sebastian/bench-runs/` — 每次预测存档（审计轨迹）
+- `/c/Users/mou25/.sebastian/bench-history.json` — 历次得分（回归对比）
+
+**用例格式：**
+
+```json
+{"id": 1, "layer": "single-output", "scenario": "描述",
+ "prompt": "用户任务原文",
+ "expected_skills": ["logo-generator"],
+ "expected_template": "E",          // 可选：期望命中的模板
+ "expected_level": "EXACT"}          // EXACT(默认) | NOMATCH(期望无匹配)
+```
+
+**流程：**
+
+1. **确定性校验**（先于任何模型判断，格式错误立即失败）：
+   `python3 /c/Users/mou25/.sebastian/bench.py validate`
+   — 检查用例 id 唯一、prompt 非空、expected_skills 非空（NOMATCH 除外）、期望技能存在于 index.json
+2. **批量匹配**：一次读取全部用例，对每条按 Phase 1 加权匹配规则（意图关键词 + 三级定级）输出预测。**全部用例在单次回复内输出**，不要逐条多轮调用。预测格式：
+
+   ```json
+   {"cases": [
+     {"id": 1, "matched_skills": ["logo-generator"], "confidence": 0.95,
+      "template": "E", "note": "..."}
+   ]}
+   ```
+
+   - EXACT 用例：`matched_skills[0]` 是 top-1 推荐；NOMATCH 用例：输出空数组（走回退链），不得硬凑技能
+3. **打分**：`python3 /c/Users/mou25/.sebastian/bench.py score <预测文件路径>`
+   — 输出 hit@1 / hit@3、分层报告（single-output / composite / multi-step / nomatch）、模板命中率
+   - 与 bench-history.json 对比：**相比上次基线下降 ≥ 3pt 或 10%** → 回归告警
+   - **总体 < 80%** → 绝对阈值告警
+4. **处置告警**：回看 miss 用例 → 判断是索引质量问题（`/sebastian update index`）还是 SKILL.md 规则问题（修改匹配规则）→ 修复后重跑验证
+
+**触发时机：** 每次修改 SKILL.md 匹配规则 / 更新索引 / 新增外部工具后建议运行一次。工作流完成后追加 lessons 记录（与 bench 同一任务时）。
+
+---
+
+### 8. `/sebastian compact lessons` — 压缩学习日志（锚定摘要归档）
+
+lessons.json 是**扁平数组**（保留上限 50 条），超出后旧记录做锚定增量摘要，归档进 lessons-archive.json。
+
+**流程：**
+
+1. 状态检查：`python3 /c/Users/mou25/.sebastian/compact_lessons.py --status`
+   — 超上限显示 ⚠️ 并建议压缩；未超则无需处理
+2. 截断：`python3 /c/Users/mou25/.sebastian/compact_lessons.py --cut`
+   — 最老的超出记录按主技能分桶移入 `pending-archive.json`，lessons.json 只保留最新 50 条
+3. **锚定摘要（模型执行）**：对 pending 的每个桶生成**固定章节**摘要（只做增量合并，绝不整体重写）：
+
+   ```json
+   {"skill": "<主技能名，逐字保留>",
+    "period": "<YYYY-MM-DD ~ YYYY-MM-DD>",
+    "stats": {"ok": 3, "modified": 1, "failed": 1},
+    "decisions": ["<结论性要点；技能名/文件路径逐字保留，不意译>"],
+    "failures": [{"phenomenon": "<失败现象>", "root_cause": "<机制原因>",
+                  "fix": "<修复>", "result": "ok|failed"}]}
+   ```
+
+4. 归档：`python3 /c/Users/mou25/.sebastian/compact_lessons.py --merge <digest.json>`
+   — 同 skill+period 已存在时**增量扩展**（拼接 sections），不去重写旧摘要
+5. 删除已消费的 pending-archive.json
+
+**原则：** 标识符（技能名、路径）逐字保留；仅压缩散文描述；首轮约束（冲突消解规则等）永不归档压缩。
 
 ---
 
@@ -698,6 +772,8 @@ Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 
 
 两者分工：Lessons 记录整个工作流的复盘信息，rpg-loop 记录每个自建技能的 XP 用于升级。
 
+**成长治理：** lessons.json 是扁平数组，保留上限 50 条。记录超过 40 条后 `--status` 给出警告，超过 50 条后执行 `/sebastian compact lessons`——旧记录按主技能分桶、锚定增量摘要后归档到 `lessons-archive.json`（详见命令 8）。归档摘要与 flat 记录同样参与 `/sebastian review` 的统计与复盘。
+
 ### Lessons 记录格式
 
 工作流执行完毕后（所有步骤完成或用户终止），Sebastian 自动追加一条记录到 `/c/Users/mou25/.sebastian/lessons.json`：
@@ -801,5 +877,5 @@ Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 
 
 - 作者：何牟
 - 来源：内部自建
-- 版本：2.4.0
-- 最后更新：2026-07-03
+- 版本：2.6.0
+- 最后更新：2026-09-07
