@@ -1,7 +1,7 @@
 ---
 name: sebastian
-description: 工程管家 v2 — 分析任务、加权匹配 skills、编排多步骤工作流、管理工具索引、路由评测与记录压缩
-version: 2.6.0
+description: 工程管家 v2 — 分析任务、加权匹配 skills、编排多步骤工作流、管理工具索引、路由评测、记录压缩与升级治理
+version: 2.7.0
 tags: [orchestration, management, meta, workflow]
 capabilities: 意图理解（Phase 0 流水线）、任务分析与拆解、skills 加权匹配与三级定级、**外部工具匹配与关键词触发**、多步骤工作流编排、工具索引管理与健康诊断、工作流复盘与学习日志
 scenarios: 复杂多步骤任务、技能发现与管理、工作流规划、索引健康诊断、学习复盘、**外部工具路由与触发**
@@ -97,6 +97,8 @@ Sebastian 是一个元技能（meta-skill），负责：
    存在则继续，不存在则返回用户报告错误。
    不搜索、不猜测、不试替代写法。
    ```
+
+   对关键步骤可追加一行"成功判定"（可验收的产出断言，见「工作流模板」章节约定），非关键步骤不必。
 
 10. **等待确认** — 用户确认后，逐步执行
 
@@ -216,14 +218,16 @@ Intent {
 
 ---
 
-### 6. `/sebastian review` — 审查学习日志
+### 6. `/sebastian review` — 审查学习日志与升级推荐
 
 **流程：**
 
 1. 运行 `python3 /c/Users/mou25/.sebastian/compact_lessons.py --status`（先检查是否超阈值）
-2. 读取 `/c/Users/mou25/.sebastian/lessons.json` + `/c/Users/mou25/.sebastian/lessons-archive.json`（如存在）
+2. 读取 `/c/Users/mou25/.sebastian/lessons.json` + `/c/Users/mou25/.sebastian/lessons-archive.json`（如存在）+ `/c/Users/mou25/.sebastian/upgrade-attempts.json`（升级尝试档案）
 3. 汇总统计：总执行次数、各 skill 使用次数、XP 排名
-4. 推荐 XP ≥ 5 的 skill 走 `/skill-rpg-loop` 升级
+4. **按失败定级推荐升级**（见「升级治理」章节的定级表，不再只看 XP 计数）：
+   - 先查 upgrade-attempts.json 做 **novelty 去重**：同技能 + 近同目标已有尝试记录 → 不重复推荐，引用档案中的证据
+   - 按最低可表达层（rung）推荐：技能内容层失败 → `/skill-rpg-loop`（XP ≥ 5 时）；跨技能同一失败形态 → 工作流模板层；跨模板聚集 → harness 层（Sebastian 自身规则，必须人工）
 5. 展示近期 lessons 摘要 + 归档摘要
 
 ---
@@ -290,7 +294,8 @@ lessons.json 是**扁平数组**（保留上限 50 条），超出后旧记录�
     "stats": {"ok": 3, "modified": 1, "failed": 1},
     "decisions": ["<结论性要点；技能名/文件路径逐字保留，不意译>"],
     "failures": [{"phenomenon": "<失败现象>", "root_cause": "<机制原因>",
-                  "fix": "<修复>", "result": "ok|failed"}]}
+                  "fix": "<修复>", "rung": "skill|template|harness",
+                  "result": "ok|failed"}]}
    ```
 
 4. 归档：`python3 /c/Users/mou25/.sebastian/compact_lessons.py --merge <digest.json>`
@@ -555,14 +560,27 @@ Plugin 使用与外部工具相同的匹配策略，额外支持：
 
 ## 工作流模板
 
+### 步骤成功判定约定（Success Predicate）
+
+长任务/多步任务中，每步执行完毕用**可验收的产出断言**确认完成，而不是"看起来做完了"。按技术路径约定成功判定：
+
+| 技术路径 | 成功判定示例 |
+|---------|-------------|
+| skill 步骤 | 产出物存在且满足 skill 的交付定义（如 docx 文件可打开、设计规范文档完整） |
+| external_tool 步骤 | 命令退出码 0 且输出含预期结构（无错误行）；失败时报告原始错误而非摘要改写 |
+| python/脚本步骤 | 脚本断言通过或返回码 0，关键输出字段非空 |
+| NOMATCH 回退链 | 回退链逐级走完并产出了用户可用的产出（如攻略/分析正文），且向用户说明走了通用能力 |
+
+判定失败 = 步骤失败：停止 → 报告 → 授权后继续（执行规则）。对**长流程的关键步骤**在方案中显式写明"成功判定"，避免步骤空转。
+
 ### 模板 A：Bug 调试流程
 
 适用于"系统出 bug 了 / 哪里报错了 / 性能回退了"
 
 ```
-步骤 1: /diagnosing-bugs — 结构化调试循环
-步骤 2: /tdd (可选) — 修复 + 回归测试
-步骤 3: /domain-modeling (可选) — 如果 bug 暴露了领域模型模糊，更新 CONTEXT.md
+步骤 1: /systematic-debugging — 结构化调试循环
+步骤 2: /test-driven-development (可选) — 修复 + 回归测试
+步骤 3: (可选) — 如果 bug 暴露了领域模型模糊，把结论更新进 CONTEXT.md
 ```
 
 ### 模板 B：项目启动流程
@@ -576,13 +594,15 @@ Plugin 使用与外部工具相同的匹配策略，额外支持：
 步骤 4: /triage — 打标签分类形成 backlog
 ```
 
+注：to-prd / to-issues / triage 未入索引时，对应步骤降级为 Claude 通用能力（产出 PRD 文档 / 垂直切片 / 标签清单），不要因技能缺失而中断流程。
+
 ### 模板 C：架构改进流程
 
 适用于"代码需要重构 / 架构需要优化"
 
 ```
 步骤 1: /grill-with-docs — 领域模型质询
-步骤 2: /domain-modeling — 精炼领域模型
+步骤 2: 精炼领域模型 — 把结论落进 CONTEXT.md（无专用技能时走 Claude 通用能力）
 步骤 3: /redesign-existing-projects (可选) — UI/前端视觉审计
 ```
 
@@ -594,6 +614,8 @@ Plugin 使用与外部工具相同的匹配策略，额外支持：
 步骤 1: /to-prd — 将已完成+剩余计划落地文档
 步骤 2: /handoff — 生成交接文档
 ```
+
+注：handoff / to-prd 未入索引时，直接产出交接文档 markdown（已完成 + 剩余计划 + 关键上下文），不中断流程。
 
 ### 模板 E：视觉产出流程
 
@@ -620,7 +642,7 @@ Plugin 使用与外部工具相同的匹配策略，额外支持：
   - Word 文档 → /docx
   - 电子表格 → /xlsx
   - 演示文稿 → /pptx
-步骤 2: /handoff (可选) — 长任务需要存档
+步骤 2: (可选) — 长任务需要存档（/handoff 或 Claude 交接文档，见模板 D 注）
 ```
 
 ### 模板 G：内容→格式两步流水线（新增）
@@ -711,9 +733,9 @@ Intent.deliveryFormat = docx  → /docx（输出 .docx）
 
 ## 集成指南
 
-### 与 `diagnosing-bugs` 的集成
+### 与 `systematic-debugging` 的集成
 
-识别现象关键词（"报错"、"失败"、"异常"、"崩溃"、"性能回退"），优先编排 `/diagnosing-bugs` 作为第一步。
+识别现象关键词（"报错"、"失败"、"异常"、"崩溃"、"性能回退"），优先编排 `/systematic-debugging` 作为第一步（模板 A）。
 
 ### 与 `find-skill` 的集成
 
@@ -730,7 +752,7 @@ Intent.deliveryFormat = docx  → /docx（输出 .docx）
 
 ### 与 `darwin-skill` 的集成
 
-当 lessons 中某技能连续 modified/failed 超过 3 次，推荐使用 `/darwin-skill` 做结构性优化。
+当 lessons 中某技能连续 modified/failed 超过 3 次（且 novelty 门通过，见「升级治理」），推荐使用 `/darwin-skill` 做结构性优化。**产出契约：** darwin 的升级产物必须是 itemized delta（变更点清单 + 理由 + 回归风险），逐条经人工批准后落地；禁止整体重写技能全文。被拒的升级方案连同证据写入 upgrade-attempts.json。
 
 ### 与 `handoff` 的集成
 
@@ -785,14 +807,20 @@ Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 
   "workflow": ["skill-A", "skill-B"],
   "result": "ok | modified | failed",
   "lesson": "学到的东西或发现的不足",
-  "recommendation": "建议升级/创建哪个 skill"
+  "recommendation": "建议升级/创建哪个 skill",
+  "rung": "skill | template | harness",       // 可选: 失败所属最低可表达层
+  "signature": {                              // 可选 (result != ok 时推荐填): 失败三元签名
+    "observed": "现象(被什么拒/哪里错)",
+    "owned": "agent 是否真负责: yes|no",
+    "mechanism": "暴露的抽象机制/可复用行为模式"
+  }
 }
 ```
 
 - `result=ok` → 参与 skill 的 usage_count +1
 - `result=modified` → usage_count +3
 - `result=failed` → usage_count +5
-- XP ≥ 5 的 skill 在 `/sebastian review` 时推荐走 `/skill-rpg-loop` 升级
+- **升级推荐规则**（v2.7.0 起替代单纯 XP 计数）：XP ≥ 5 **且**通过 novelty 去重 → 按 `rung` 推荐（详见「升级治理」章节）。教训按三元签名填写，禁止只按表面错误归因
 
 ### rpg-loop 记录调用时机
 
@@ -812,6 +840,68 @@ Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 
 ```
 
 每步独立记录，不应等到整个工作流结束才统一调用。
+
+---
+
+## 升级治理：定级 · 去重 · 验收 · 锚点
+
+v2.7.0 起，Sebastian 的技能/规则升级不再由使用计数单独驱动，改由四道机制治理。借鉴自外部上下文工程体系的 self-improvement 实践，只取核心模式、不复制完整公式（遵守冲突消解规则 4）。
+
+### 失败→修复定级表（Rung Ladder）
+
+原则：**在能表达该修复的最低层修复**。只有当失败在当前层跨候选持续聚集时才上移。
+
+| 失败形态（按三元签名聚类） | 最低可表达层 (rung) | 处置 |
+|--------------------------|--------------------|------|
+| 单技能执行错 / 缺领域细节（现象发生在某 skill 内部） | `skill`（技能内容层） | modified/failed 计数 ≥3 → darwin；XP ≥5 且 novelty 通过 → rpg-loop |
+| 同一失败跨任务重复出现，但都发生在同一 skill | `skill`（升级该技能，不换模板） | 同上 |
+| 流程编排缺步骤 / 顺序错（现象横跨多个技能） | `template`（工作流模板层） | 新增/调整模板 A–I，配 bench 用例防回归 |
+| 匹配错选 / 规则互相打架（现象横跨多个模板） | `harness`（Sebastian 自身规则） | 修改 SKILL.md 匹配/编排规则 → 必须人工批准 + bench 验证 |
+
+定级时看 `signature.mechanism`（抽象机制），禁止只按错误字符串聚类——同一失败现象可能来自无关机制。
+
+### Novelty 门 + 升级尝试档案（防重复返工）
+
+- 档案文件：`/c/Users/mou25/.sebastian/upgrade-attempts.json`（append-only，被拒条目永不删除）
+- 每次升级推荐前，**先查档案**：同技能 + 目标失败模式相似（语义近似）已有尝试 → 不重复推荐，引用档案证据，转而建议更高层或放弃
+- 档案条目格式：
+
+```json
+{"date": "2026-09-08T00:00:00Z", "skill": "bifeng",
+ "goal": "修复的失败模式(引 lessons 记录)",
+ "proposal": "变更摘要(delta 清单)", "result": "accepted | rejected",
+ "evidence": "验收证据或拒绝理由"}
+```
+
+- 被拒后若失败仍复现，才允许上移一层重试（skill → template → harness）
+
+### 升级产出契约：itemized delta，不整体重写
+
+任何对技能内容/规则的升级（rpg-loop、darwin、手工）必须：
+
+1. 输出**增量修改点清单**（改动条目 + 原因 + 回归风险），逐条批准
+2. 升级产物为 itemized delta 列表，**绝不整体重写 SKILL.md 全文**（整体重写会让已保留细节被重新降权）
+3. 每次升级同步补一条对应 bench 用例（涉及匹配/路由规则时）或 lessons 记录
+4. **Empirical acceptance**：验收凭下一次同类任务的实测结果，不接受仅凭升级理由；`modified` 记录的 lesson 字段须写明"差距在哪"，作为验收基准
+
+### 保护锚点与人工决策点
+
+**保护锚点（不可压缩 / 不可被进化流程改写，只能人工批准后修改）：**
+1. 冲突消解规则 1–4（上游优先 / 垂直分离 / 早退出 / 不重复）
+2. Scope Guard 两维度判定表
+3. 三级定级与阈值熔断（EXACT ≥70% / INDIRECT 30–69% / NOMATCH <30%）
+4. 执行规则中的授权条款（失败→停止→报告→授权后继续）
+5. 回退链顺序
+6. 外部工具关键词触发规则（exact/indirect 两级）
+7. 本清单自身
+
+以上锚点不随 lessons 压缩归档，也不随 darwin/rpg-loop 建议修改——`compact lessons` 只动 lessons.json 及归档文件，永不动 SKILL.md 本体。
+
+**人工决策点（永不自动）：**
+- 修改上述保护锚点或本清单
+- 修改扫描器 / 索引 schema（scan.py）或 bench 打分规则与用例集
+- 修改 lessons 压缩阈值（compact_lessons.py 的 MAX_KEEP/WARN_AT）
+- 把任何"尝试性改进"apply 到技能文件（升级产物须逐条获批后落地）
 
 ---
 
@@ -847,9 +937,9 @@ Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 
 │  匹配技能: 2 个                             │
 │  步骤依赖: 步骤 2 依赖步骤 1                │
 ├─────────────────────────────────────────────┤
-│  步骤 1: /diagnosing-bugs                   │
+│  步骤 1: /systematic-debugging             │
 │          — 结构化调试                        │
-│  步骤 2: /tdd                              │
+│  步骤 2: /test-driven-development          │
 │          — TDD 增加回归测试                  │
 └─────────────────────────────────────────────┘
 ```
@@ -877,5 +967,5 @@ Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 
 
 - 作者：何牟
 - 来源：内部自建
-- 版本：2.6.0
-- 最后更新：2026-09-07
+- 版本：2.7.0
+- 最后更新：2026-09-08

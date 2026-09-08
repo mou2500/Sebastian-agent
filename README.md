@@ -4,7 +4,7 @@
   <img src="assets/Sebastian_logo.svg" alt="Sebastian Logo" width="400"/>
 </p>
 
-> 版本 2.6.0 | 作者：[何牟](https://github.com/mou2500)
+> 版本 2.7.0 | 作者：[何牟](https://github.com/mou2500)
 
 Sebastian 是一个**元技能（meta-skill）**，负责编排多步骤工作流。它是调度员，不是执行者。
 
@@ -65,9 +65,10 @@ bash install.sh
 - **Plugin 路由** — 关键词触发 Claude Code 插件技能（webnovel-writer 网文创作）
 - **工具索引管理** — 统一索引 skill / external_tool / plugin 三种类型
 - **路由评测基准** — 固定用例集量化匹配质量（hit@1/hit@3/分层报告/回归告警）
-- **8 种工作流模板** — 灵活编排多步骤任务
+- **8 种工作流模板** — 灵活编排多步骤任务（含步骤成功判定约定）
 - **双轨记录** — Lessons 复盘 + rpg-loop XP 经验值
 - **记录锚定压缩** — lessons 超阈值后按技能分桶归档，固定章节增量摘要
+- **升级治理** — 失败定级（skill/template/harness）+ novelty 去重档案 + itemized delta 升级契约 + 保护锚点
 - **索引健康诊断** — 技能索引质量检查与修复
 
 ## 许可

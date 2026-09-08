@@ -165,6 +165,7 @@ def cut():
     print('   "decisions": ["<结论性要点; 涉及技能名/文件路径逐字保留>"],')
     print('   "failures": [{"phenomenon": "<失败现象>",')
     print('                  "root_cause": "<机制原因>", "fix": "<修复>",')
+    print('                  "rung": "skill|template|harness",')
     print('                  "result": "ok|failed"}]}')
     print("  规则: 只做增量合并, 绝不整体重写; workflow 数组逐字保留")
     print(f"  完成后执行: python3 compact_lessons.py --merge <digest.json>")

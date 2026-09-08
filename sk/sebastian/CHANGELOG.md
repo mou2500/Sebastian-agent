@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.7.0 (2026-09-08)
+
+P1+P2 进化(借鉴 ACE: 失败定级 / novelty 去重 / 增量契约 / 保护锚点)
+
+- **新增「升级治理」章节** — 升级不再由使用计数单独驱动:
+  - 失败→修复定级表: skill(技能内容) / template(模板) / harness(自身规则) 三层, 在最低可表达层修复
+  - Novelty 门: 新增 `upgrade-attempts.json` 升级尝试档案(append-only), 推荐升级前查重, 被拒条目带证据永不删除
+  - 升级产出契约: itemized delta(增量清单 + 逐条批准), 禁止整体重写技能全文; Empirical acceptance 凭实测证据验收
+- **Lessons 记录扩展**: 可选 `rung` 与 `signature`(失败三元签名: 现象/责任/机制) 字段; 归档摘要 failures 条目同步带 rung
+- `/sebastian review` 重写: 先查 upgrade-attempts 去重 → 按 rung 推荐(替代纯 XP 计数)
+- **保护锚点与人工决策点**: 冲突消解规则 / Scope Guard / 阈值熔断 / 授权条款 / 回退链等列为不可压缩、不可被进化流程改写; 扫描器、bench 规则、压缩阈值改动须人工
+- **步骤成功判定约定** (Success Predicate): 按技术路径定义可验收产出断言, 长流程关键步骤在方案中显式写明
+- **修复技能名错位**: 模板 A / 集成指南 / 示例中 diagnosing-bugs→systematic-debugging、tdd→test-driven-development; 模板 B/D 引用未入索引技能处加回退注(不中断流程)
+- 与 darwin-skill 集成契约更新: 升级产物须为 itemized delta, 被拒方案记入档案
+
 ## 2.6.0 (2026-09-07)
 
 P0 进化(借鉴 ACE: 路由可评测 + 记录压缩治理)
