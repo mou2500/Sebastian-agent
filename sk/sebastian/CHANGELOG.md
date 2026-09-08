@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.7.1 (2026-09-08)
+
+能力校验修复(隔离测试 + 突变测试驱动)
+
+- **修复 bench 自证偏差缺陷**: 新增 `bench.py exam` 子命令, 生成剥离标准答案的 `bench.exam.json`(只留 id+prompt)
+  - 此前模型预测时直接读含 expected_* 的 bench.json = "对答案", 100% 命中不能反映真实路由能力
+  - SKILL.md bench 流程改为: validate → **exam** → 只读 exam 版批量预测 → score
+- 隔离环境验证(SEBASTIAN_HOME 沙箱): compact cut/merge 全路径 12 项测试通过
+  (超限识别/保留 50/分桶 4 技能/二次 merge 增量扩展/stats 累加/低水位拒绝/全错预测 exit=1 告警)
+- 突变测试确认: 删除索引技能后 bench 能检出 miss(回归检测有效, 修复答案可见性后完整成立)
+
 ## 2.7.0 (2026-09-08)
 
 P1+P2 进化(借鉴 ACE: 失败定级 / novelty 去重 / 增量契约 / 保护锚点)

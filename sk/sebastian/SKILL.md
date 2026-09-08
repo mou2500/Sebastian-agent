@@ -1,7 +1,7 @@
 ---
 name: sebastian
 description: 工程管家 v2 — 分析任务、加权匹配 skills、编排多步骤工作流、管理工具索引、路由评测、记录压缩与升级治理
-version: 2.7.0
+version: 2.7.1
 tags: [orchestration, management, meta, workflow]
 capabilities: 意图理解（Phase 0 流水线）、任务分析与拆解、skills 加权匹配与三级定级、**外部工具匹配与关键词触发**、多步骤工作流编排、工具索引管理与健康诊断、工作流复盘与学习日志
 scenarios: 复杂多步骤任务、技能发现与管理、工作流规划、索引健康诊断、学习复盘、**外部工具路由与触发**
@@ -256,7 +256,10 @@ Intent {
 1. **确定性校验**（先于任何模型判断，格式错误立即失败）：
    `python3 /c/Users/mou25/.sebastian/bench.py validate`
    — 检查用例 id 唯一、prompt 非空、expected_skills 非空（NOMATCH 除外）、期望技能存在于 index.json
-2. **批量匹配**：一次读取全部用例，对每条按 Phase 1 加权匹配规则（意图关键词 + 三级定级）输出预测。**全部用例在单次回复内输出**，不要逐条多轮调用。预测格式：
+2. **生成无答案版**：`python3 /c/Users/mou25/.sebastian/bench.py exam`
+   — 输出 `bench.exam.json`（只保留 id + prompt，剥离 expected_skills / expected_template / expected_level / note 全部答案与提示字段）
+   — **原因：原版 bench.json 含标准答案，模型直接读它做预测 = 自证偏差（对答案），测不出真实路由能力**
+3. **批量匹配**：**只读 `bench.exam.json`**，对每条按 Phase 1 加权匹配规则（意图关键词 + 三级定级）输出预测。**全部用例在单次回复内输出**，不要逐条多轮调用。禁止参考原 bench.json。预测格式：
 
    ```json
    {"cases": [
@@ -266,11 +269,11 @@ Intent {
    ```
 
    - EXACT 用例：`matched_skills[0]` 是 top-1 推荐；NOMATCH 用例：输出空数组（走回退链），不得硬凑技能
-3. **打分**：`python3 /c/Users/mou25/.sebastian/bench.py score <预测文件路径>`
+4. **打分**：`python3 /c/Users/mou25/.sebastian/bench.py score <预测文件路径>`
    — 输出 hit@1 / hit@3、分层报告（single-output / composite / multi-step / nomatch）、模板命中率
    - 与 bench-history.json 对比：**相比上次基线下降 ≥ 3pt 或 10%** → 回归告警
    - **总体 < 80%** → 绝对阈值告警
-4. **处置告警**：回看 miss 用例 → 判断是索引质量问题（`/sebastian update index`）还是 SKILL.md 规则问题（修改匹配规则）→ 修复后重跑验证
+5. **处置告警**：回看 miss 用例 → 判断是索引质量问题（`/sebastian update index`）还是 SKILL.md 规则问题（修改匹配规则）→ 修复后重跑验证
 
 **触发时机：** 每次修改 SKILL.md 匹配规则 / 更新索引 / 新增外部工具后建议运行一次。工作流完成后追加 lessons 记录（与 bench 同一任务时）。
 
@@ -967,5 +970,5 @@ v2.7.0 起，Sebastian 的技能/规则升级不再由使用计数单独驱动�
 
 - 作者：何牟
 - 来源：内部自建
-- 版本：2.7.0
+- 版本：2.7.1
 - 最后更新：2026-09-08

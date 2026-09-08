@@ -8,12 +8,14 @@ scored against expected skills. Deterministic checks run BEFORE model judging.
 Workflow (executed by Claude per SKILL.md):
     /sebastian bench
       step 1: python3 bench.py validate
-      step 2: model reads ~/.sebastian/bench.json, runs Phase-1 weighted
-              matching per case, writes predictions JSON (single batch)
+      step 2: python3 bench.py exam        # strip answers → bench.exam.json
+              model reads bench.exam.json ONLY (never the full bench.json),
+              runs Phase-1 weighted matching per case, writes predictions JSON
       step 3: python3 bench.py score <predictions.json>
 
 Usage:
     python3 bench.py validate [--bench <bench.json>]
+    python3 bench.py exam [--bench <bench.json>] [--out <path>]
     python3 bench.py score <predictions.json> [--bench <bench.json>]
     python3 bench.py history
 
@@ -310,6 +312,26 @@ def score(pred_path, bench_path):
     return 1 if (regressed or absolute_fail) else 0
 
 
+def exam(bench_path, out_path=None):
+    """Strip answers from the dataset so the matching model cannot see them
+    (self-grading bias: a model that reads expected_skills can 'cheat')."""
+    bench = load_json(bench_path, "benchmark dataset")
+    stripped = {
+        "meta": {
+            "schema": 1,
+            "note": "exam 版: 已剥离 expected_* 与场景提示。模型只读此文件做匹配预测, 禁止参考原 bench.json",
+        },
+        "cases": [{"id": c["id"], "prompt": c["prompt"]} for c in bench["cases"]],
+    }
+    out_path = out_path or os.path.join(_sebastian_dir(), "bench.exam.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(stripped, f, ensure_ascii=False, indent=2)
+    n = len(stripped["cases"])
+    print(f"[bench] exam 版已生成 → {out_path} ({n} 例, 无答案字段)")
+    print(f"[bench] 注意: 预测时只读 exam 版; 原 bench.json 含标准答案, 禁止作为预测依据")
+    return out_path
+
+
 def show_history():
     history = _load_history()
     if not history:
@@ -334,6 +356,9 @@ def main():
     sp = sub.add_parser("score", help="score model predictions against bench.json")
     sp.add_argument("predictions", help="predictions JSON file")
 
+    sp = sub.add_parser("exam", help="emit answer-stripped dataset for the matcher")
+    sp.add_argument("--out", default=None, help="output path (default ~/.sebastian/bench.exam.json)")
+
     if len(sys.argv) > 1 and sys.argv[1].startswith("-") and not sys.argv[1].startswith("--bench"):
         sys.argv[1] = sys.argv[1].lstrip("-")   # accept both `--validate` and `validate`
     args = ap.parse_args()
@@ -343,6 +368,8 @@ def main():
         validate_bench(bench_path)
     elif args.cmd == "history":
         show_history()
+    elif args.cmd == "exam":
+        exam(bench_path, args.out)
     elif args.cmd == "score":
         sys.exit(score(os.path.abspath(args.predictions), bench_path))
 
