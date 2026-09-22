@@ -1,10 +1,10 @@
 ---
 name: sebastian
-description: 工程管家 v2 — 分析任务、加权匹配 skills、编排多步骤工作流、管理工具索引、路由评测、记录压缩与升级治理
-version: 2.7.1
+description: 工程管家 v2 — 分析任务、加权匹配 skills、编排多步骤工作流、管理工具索引、路由评测、记录压缩与升级治理、**轻量版本化与技能健康度面板**
+version: 2.9.0
 tags: [orchestration, management, meta, workflow]
-capabilities: 意图理解（Phase 0 流水线）、任务分析与拆解、skills 加权匹配与三级定级、**外部工具匹配与关键词触发**、多步骤工作流编排、工具索引管理与健康诊断、工作流复盘与学习日志
-scenarios: 复杂多步骤任务、技能发现与管理、工作流规划、索引健康诊断、学习复盘、**外部工具路由与触发**
+capabilities: 意图理解（Phase 0 流水线）、任务分析与拆解、skills 加权匹配与三级定级、**外部工具匹配与关键词触发**、多步骤工作流编排、工具索引管理与健康诊断、工作流复盘与学习日志、**轻量版本化修订快照**、**回退链显式标注**、**技能健康度面板**
+scenarios: 复杂多步骤任务、技能发现与管理、工作流规划、索引健康诊断、学习复盘、**外部工具路由与触发**、**技能修订回滚与健康度监测**
 paired_with: [find-skill, darwin-skill, skill-creator, skill-rpg-loop]
 source: internal
 ---
@@ -19,6 +19,8 @@ Sebastian 是一个元技能（meta-skill），负责：
 3. 管理工具索引（更新、列出、搜索、健康诊断）
 4. **识别与同类型技能的边界**，做出正确的路由决策
 5. **通过关键词触发外部工具和插件** — 用户提及 job search/求职等关键词时，自动路由到 career-ops 等外部工具；提及写小说/网文等关键词时，自动路由到 webnovel-writer 等插件
+6. **轻量版本化** — 每次 `--scan` 自动为内容变更的 SKILL.md 存一份修订快照到 `~/.sebastian/skill-revisions/<name>/`，支持回滚（v2.9.0 新增）
+7. **技能健康度监测** — 从 lessons.json + lessons-archive.json 聚合每个技能的 ok/modified/failed 次数、回退率、失败 rung 分布，输出健康面板（v2.9.0 新增）
 
 **核心理念：** Sebastian **不直接调用**其他 skills，也不自行完成任务。它生成工作流方案，由 Claude 按步骤执行。它是调度员，不是执行者。
 
@@ -215,6 +217,7 @@ Intent {
 1. 运行 `python3 /c/Users/mou25/.sebastian/scan.py --diagnose`
 2. 输出索引健康度报告：总计 / 完整 / 基本 / 稀疏 各多少
 3. 列出字段缺失最严重的技能
+4. 如需看技能使用/失败健康度，用 `/sebastian health`（命令 10）；如需看修订历史，用 `/sebastian revisions`（命令 9）
 
 ---
 
@@ -306,6 +309,42 @@ lessons.json 是**扁平数组**（保留上限 50 条），超出后旧记录�
 5. 删除已消费的 pending-archive.json
 
 **原则：** 标识符（技能名、路径）逐字保留；仅压缩散文描述；首轮约束（冲突消解规则等）永不归档压缩。
+
+---
+
+### 9. `/sebastian revisions` — 查看技能修订历史
+
+轻量版本化。每次 `--scan` 时，若某 SKILL.md 内容 hash 与上次记录不同，自动把当前内容快照到 `~/.sebastian/skill-revisions/<skill-name>/<timestamp>_<hash8>.md`（每技能最多保留 20 份，超出裁剪最旧）。
+
+**子命令：**
+
+1. 汇总：`python3 /c/Users/mou25/.sebastian/scan.py --revisions`
+   — 列出所有技能的修订数、最新快照时间、总占用空间
+2. 历史：`python3 /c/Users/mou25/.sebastian/scan.py --history <skill-name>`
+   — 列出该技能全部修订（文件名 + hash + 大小），用于定位要回滚到哪个版本
+3. 回滚：`python3 /c/Users/mou25/.sebastian/scan.py --revert <skill-name> <revision-filename>`
+   — 先快照当前状态（保证回滚可逆），再覆盖 SKILL.md；需追加 `--yes` 才真正执行
+
+**用途：** 技能改坏后可回滚；bench 回归时可定位是哪次 `--scan` 引入的变更。index.json 每条记录新增 `content_hash` / `last_revision` / `revision_count` 字段；`--list` 表格新增 `Rev` 列。
+
+---
+
+### 10. `/sebastian health` — 技能健康度面板
+
+从 lessons.json（flat）+ lessons-archive.json（归档摘要）聚合统计，输出技能健康面板。
+
+**流程：**
+
+1. 运行 `python3 /c/Users/mou25/.sebastian/scan.py --health`
+2. 面板内容：
+   - **总览** — 索引技能数、lessons 总数、ok/modified/failed/fallback 占比
+   - **Most Used** — 按 lesson 记录数排序 Top 10，含最近使用时间
+   - **High Failure Rate** — 失败率 ≥30% 且记录 ≥2 条的技能（附失败 rung 分布，驱动升级定级）
+   - **High Modification Rate** — 修改率 ≥40% 且记录 ≥2 条的技能（升级候选）
+   - **Never Used** — 在索引中但无任何 lesson 记录的技能清单
+3. 提示：面板底部指引用 `/sebastian review` 查看升级推荐（按失败定级）
+
+**数据源约定：** 面板读取 lessons 的 `result` / `workflow` / `fallback` / `rung` 字段；归档摘要读 `stats` 与 `fallback_top`。字段缺失时向后兼容（视为 0），不影响既有数据。
 
 ---
 
@@ -711,6 +750,32 @@ Intent.deliveryFormat = docx  → /docx（输出 .docx）
   - 小说创作语境 → webnovel-writer
   - 营销文案语境 → bifeng
 
+### 模板 K：内容质检/把关流水线（jev-judge）
+
+适用于"文案/内容发布前把关 / 合规自查 / 批量内容分类路由"
+
+触发条件：内容**已存在或已定稿**，需要判断质量、合规风险、语气风格或投放渠道，且**不需要改写**。
+
+```
+步骤 1: <内容产出技能> (可选)
+         — 内容尚未产出时先用 bifeng / ecommerce-visual-copywriting 定稿
+         — 内容已存在则跳过本步
+步骤 2: /jev-judge — 按需选择问题组下判断:
+  - 质量打分 → --preset quality
+  - 合规把关 → --preset compliance
+  - 语气判定 → --preset tone
+  - 渠道匹配 → --preset channel
+  - 自定义问题 → --questions <file>
+          技术路径: python 脚本 (uv run python scripts/jev.py)
+          成功判定: 退出码 0 且输出含各问题组结果行 (Noul 项给出 YES/NO + 概率)
+步骤 3: (条件) 人工复核 — 仅当 compliance 的「需要人工复核」判为 YES 时触发
+```
+
+**约定：**
+- 判定为"不合规"时**改写回步骤 1**——改写的活是 bifeng 的，jev-judge 不生成文本
+- 判定结果是概率不是判决书；对外汇报时须同时给出概率或置信度
+- 批量内容路由（`--preset channel`）可直接替代人工分类打标
+
 ---
 
 ## 与同类型技能的冲突边界
@@ -781,8 +846,11 @@ Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 
 | imagegen-frontend-mobile | `design` | image |
 | kami | `typesetting` | html |
 | sebastian | `meta` | none |
+| jev-judge | `judgment` | none（判断结果，无文件产出） |
 | **career-ops** 🡒 外部工具 | `job-search` | pdf / md / none（取决于子命令） |
 | **webnovel-writer** 🡒 Plugin | `creative-writing` | md / json / none（取决于子命令） |
+
+**判定层（第三维度）：** `jev-judge` 既不产出内容也不包装格式，而是对已有内容下判断。Scope Guard 的内容/形式两层判定对它不适用——它不参与 coreType 竞争，仅在"内容已存在、需要把关"时作为附加步骤接入（模板 K）。其输出是**概率化判断而非结论**：Score 的档数跟着 criteria 走（3 档 → 0~2 分），跨问题比较前先确认档数一致；置信度低时看概率分布，不要只看那个平均分。
 
 ---
 
@@ -816,6 +884,10 @@ Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 
     "observed": "现象(被什么拒/哪里错)",
     "owned": "agent 是否真负责: yes|no",
     "mechanism": "暴露的抽象机制/可复用行为模式"
+  },
+  "fallback": {                               // 可选 (v2.9.0): 走了回退链时显式标注
+    "chain": "NOMATCH→通用能力",
+    "reason": "无技能匹配出行攻略，用通用能力+anysearch 完成"
   }
 }
 ```
@@ -824,6 +896,7 @@ Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 
 - `result=modified` → usage_count +3
 - `result=failed` → usage_count +5
 - **升级推荐规则**（v2.7.0 起替代单纯 XP 计数）：XP ≥ 5 **且**通过 novelty 去重 → 按 `rung` 推荐（详见「升级治理」章节）。教训按三元签名填写，禁止只按表面错误归因
+- **回退显式化（v2.9.0）**：当工作流某步实际走了「不匹配时的回退链」（如 NOMATCH→通用能力、技能缺失→降级为通用能力）时，在该 lessons 记录填 `fallback` 字段，写明 `chain`（走的回退路径）与 `reason`（为什么回退）。这让用户能区分"精确匹配完成"与"凑活出来的"，`/sebastian health` 面板据此统计回退率。脚本向后兼容 `fallback_reason` / `fallback_chain` 旧字段名。
 
 ### rpg-loop 记录调用时机
 
@@ -970,5 +1043,5 @@ v2.7.0 起，Sebastian 的技能/规则升级不再由使用计数单独驱动�
 
 - 作者：何牟
 - 来源：内部自建
-- 版本：2.7.1
-- 最后更新：2026-09-08
+- 版本：2.9.0
+- 最后更新：2026-09-22

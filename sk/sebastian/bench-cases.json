@@ -222,6 +222,23 @@
       "prompt": "不知道有没有能帮我分析股权激励方案的技能，帮我搜搜看",
       "expected_level": "NOMATCH",
       "note": "先 NOMATCH 无匹配报告 → 建议 /find-skills (索引名 find-skills, SKILL.md 写作 find-skill)"
+    },
+    {
+      "id": 29,
+      "layer": "single-output",
+      "scenario": "内容合规把关 → jev-judge (模板 K)",
+      "prompt": "这篇小红书文案发布前帮我查一下有没有夸大宣传和绝对化用语",
+      "expected_skills": ["jev-judge"],
+      "expected_template": "K",
+      "note": "内容已定稿、只需下判断 → jev-judge preset compliance; 模板 K 判定层, coreType=judgment 不参与内容/形式竞争"
+    },
+    {
+      "id": 30,
+      "layer": "single-output",
+      "scenario": "反例: 文案润色走 bifeng 而非 jev-judge",
+      "prompt": "帮我把这段产品描述改写得更吸引人",
+      "expected_skills": ["bifeng"],
+      "note": "改写/润色是生成任务 → bifeng; jev-judge 不生成文字, 只做判定, 不可路由到该技能"
     }
   ]
 }

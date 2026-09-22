@@ -1,5 +1,42 @@
 # Changelog
 
+## 2.9.0 (2026-09-22)
+
+借鉴 skillbox 三项轻量改进(版本化 / 回退显式化 / 使用统计健康度)
+
+> 来源: 对比 `kitze/skillbox` 后, 取其"不可变修订 + fallbackReason + 使用量上报"核心模式,
+> 以文件系统 + 现有脚本实现, 不引入数据库/服务(遵守冲突消解规则 4: 只取核心模式不复制完整公式)。
+
+- **1. 轻量版本化(修订快照)**
+  - `scan.py --scan` 时为内容 hash 变更的 SKILL.md 自动快照到 `~/.sebastian/skill-revisions/<name>/<ts>_<hash8>.md` (每技能上限 20 份, 超出裁剪最旧)
+  - 新增 `--revisions` / `--history <skill>` / `--revert <skill> <rev> [--yes]` 命令; revert 先快照当前态保证可逆
+  - index.json 每条记录新增 `content_hash` / `last_revision` / `revision_count`; `--list` 表格新增 `Rev` 列
+  - Windows GBK 输出修复: scan.py 顶部 `sys.stdout/stderr.reconfigure(encoding="utf-8")`
+- **3. 回退显式化(fallbackReason)**
+  - lessons 记录新增可选 `fallback` 字段 `{chain, reason}`, 显式标注"哪步走了回退链、为什么"; 向后兼容 `fallback_reason` / `fallback_chain` 旧字段名
+  - `compact_lessons.py --status` 新增回退率统计 + Top-3 回退原因; 归档摘要新增 `fallback_top` 聚合; `--merge` 增量合并 fallback_top
+- **5. 使用统计与健康度面板**
+  - `scan.py --health`: 从 lessons.json + lessons-archive.json 聚合每技能 ok/modified/failed/fallback 次数、最近使用时间、失败 rung 分布
+  - 面板含: 总览 / Most Used Top10 / High Failure Rate(≥30%) / High Modification Rate(≥40%) / Never Used 清单
+  - `_load_lessons_stats` 兼容 flat 与归档摘要两种来源, 字段缺失向后兼容(视为 0)
+- **SKILL.md**: 版本 2.8.0 → 2.9.0; 新增命令 9 (`/sebastian revisions`) 与 10 (`/sebastian health`); 概述第 6/7 条; Lessons 记录格式补 fallback 字段说明; 命令 5 加指向 health/revisions 的指针
+
+**后续(未做):** 技能匹配推荐方式的原理研究(确定性 TF-IDF + 模型语义微调双层架构) — 明日专项。
+
+## 2.8.0 (2026-09-21)
+
+jev-judge 接入(判定层第三维度) + bench 基线纠偏
+
+- **判定层第三维度**: coreType 映射表新增 `jev-judge | judgment | none`, 并注明判定层既不产出内容也不包装格式, 不参与 coreType 竞争, 仅在"内容已存在、需要把关"时作为附加步骤接入
+- **新增模板 K (内容质检/把关流水线)**: 内容定稿 → jev-judge 按 preset 下判断(quality/compliance/tone/channel/自定义) → 条件人工复核; 约定"判为不合规则改写回步骤 1"(改写归 bifeng, jev-judge 不生成文本)
+- jev-judge frontmatter 补 `paired_with: [bifeng, ecommerce-visual-copywriting]` 与 `maintainer`, 版本 1.0 → 1.1 (索引 8/8 字段)
+- bench 用例 +2 共 30 例: id 29 (合规把关 → jev-judge, 模板 K)、id 30 (反例: 润色改写走 bifeng 而非 jev-judge)
+- **bench 首轮消除答案可见性后的真实测量**: hit@1 26/30 (86.7%), hit@3 26/30, 模板 6/7
+  - 历史 100% 基线(20260908T031129Z)早于 exam 机制(同日 13:00 才修复自证偏差) → 属污染数据; **86.7% 才是可信基线**, 本次"回归告警"为假警报
+  - 4 条 miss: #13 简历润色误配 career-ops(应 bifeng)、#24 长文排版误配 bifeng(应 kami)、#4 landing page 误配 design-taste-frontend(应 guizang-ppt-skill)、#28 直接命中 find-skills(用例期望 NOMATCH, 疑似用例设计问题)
+  - 模板 miss 1/7 恰为 #17 期望模板 J —— 而 SKILL.md 无模板 J(见遗留项), 即该缺陷已实际造成评分损失
+- **遗留项(本次未修, 需人工决策)**: ①模板 J(照片→插画)被 lessons 2026-08-21、CHANGELOG 2.6.0、bench case 17 三处引用, 但 SKILL.md 从未落地; ②bench 用例集与打分规则属人工决策点, #4/#28 疑似用例设计问题需人工复核后再改
+
 ## 2.7.1 (2026-09-08)
 
 能力校验修复(隔离测试 + 突变测试驱动)

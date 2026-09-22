@@ -97,27 +97,70 @@ def _load_lessons():
     return lessons
 
 
+def _has_fallback(record):
+    """Check if a lesson record has a fallback (any of several field names)."""
+    if record.get("fallback"):
+        return True
+    # Back-compat: old records may have fallback_reason at top level
+    if record.get("fallback_reason") or record.get("fallback_chain"):
+        return True
+    return False
+
+
+def _fallback_reason(record):
+    fb = record.get("fallback")
+    if isinstance(fb, dict):
+        return fb.get("reason") or fb.get("chain", ["?"])[0]
+    if isinstance(fb, str):
+        return fb
+    if record.get("fallback_reason"):
+        return record["fallback_reason"]
+    if record.get("fallback_chain"):
+        chain = record["fallback_chain"]
+        return chain[0] if isinstance(chain, list) and chain else str(chain)
+    return None
+
+
 def status():
     lessons = _load_lessons()
     n = len(lessons)
     by_result = {}
     by_skill = {}
+    n_fallback = 0
+    fallback_reasons = {}
     for r in lessons:
         by_result[r.get("result", "?")] = by_result.get(r.get("result", "?"), 0) + 1
         s = _primary(r)
         by_skill[s] = by_skill.get(s, 0) + 1
+        if _has_fallback(r):
+            n_fallback += 1
+            reason = _fallback_reason(r) or "unknown"
+            # Truncate long reason strings for display
+            short = reason[:60] + ("…" if len(reason) > 60 else "")
+            fallback_reasons[short] = fallback_reasons.get(short, 0) + 1
 
     print(f"[compact] lessons.json: {n} 条 (保留上限 {MAX_KEEP}, 警告线 {WARN_AT})")
     print(f"  按结果: " + "  ".join(f"{k}={v}" for k, v in sorted(by_result.items()))
           or "  (空)")
     print(f"  按主技能: " + "  ".join(
-        f"{k}×{v}" for k, v in sorted(by_skill.items(), key=lambda kv: -kv[1])))
+        f"{k}×{v}" for k, v in sorted(by_skill.items(), key=lambda kv: -kv[1])[:10])
+          + (f"  …共{len(by_skill)}个" if len(by_skill) > 10 else ""))
+
+    # Fallback stats
+    if n > 0:
+        pct = n_fallback * 100 // n
+        print(f"  回退任务: {n_fallback}/{n} ({pct}%)")
+        if fallback_reasons:
+            top_reasons = sorted(fallback_reasons.items(), key=lambda kv: -kv[1])[:3]
+            print(f"  常见回退原因: "
+                  + "  ".join(f"[{v}×] {k}" for k, v in top_reasons))
 
     archive = _load(_archive_path())
     if archive and archive.get("digests"):
         dig = archive["digests"]
         print(f"  归档摘要: {len(dig)} 段 ("
-              + ", ".join(f"{d.get('skill')}:{d.get('period')}" for d in dig) + ")")
+              + ", ".join(f"{d.get('skill')}:{d.get('period')}" for d in dig[:5])
+              + ("…" if len(dig) > 5 else "") + ")")
     else:
         print("  归档摘要: 无 (lessons-archive.json 尚不存在)")
 
@@ -204,6 +247,18 @@ def merge(digest_path):
                 for k, v in (d.get("stats") or {}).items():
                     ext[k] = ext.get(k, 0) + v
                 existing["stats"] = ext
+                # Merge fallback_top reasons (list of {reason, count})
+                if d.get("fallback_top"):
+                    existing.setdefault("fallback_top", [])
+                    # Simple merge: append new entries, dedup by summing counts
+                    reason_map = {x["reason"]: x["count"] for x in existing["fallback_top"]}
+                    for item in d["fallback_top"]:
+                        r = item.get("reason", "?")
+                        reason_map[r] = reason_map.get(r, 0) + item.get("count", 0)
+                    existing["fallback_top"] = sorted(
+                        [{"reason": k, "count": v} for k, v in reason_map.items()],
+                        key=lambda x: -x["count"],
+                    )[:10]
                 existing["extended_at"] = _stamp()
                 extended += 1
                 break

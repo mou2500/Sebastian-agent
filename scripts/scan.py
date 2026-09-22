@@ -13,11 +13,18 @@ Usage:
     python3 scan.py --scan-plugins  # List installed plugins from cache
 """
 
+import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
+from datetime import datetime, timezone
+
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
 
 # ---------------------------------------------------------------------------
 #  Sandbox-aware path resolution
@@ -229,9 +236,13 @@ EMPTY_RECORD = {
     "scenarios": "",
     "paired_with": [],
     "source": "",
+    "author": "",
     "external_url": "",
     "update_method": "",
     "usage_count": 0,
+    "content_hash": "",
+    "last_revision": "",
+    "revision_count": 0,
 }
 
 EMPTY_EXTERNAL_TOOL_RECORD = {
@@ -282,7 +293,7 @@ def record_from_frontmatter(fm, filepath):
     rec["path"] = filepath
     rec["type"] = "skill"
     for k in ("name", "description", "version", "capabilities", "scenarios",
-              "source", "external_url", "update_method"):
+              "source", "author", "external_url", "update_method"):
         if k in fm:
             rec[k] = fm[k]
     for k in ("tags", "paired_with"):
@@ -306,6 +317,179 @@ def record_from_body(filepath, text):
             rec["description"] = line[:200]
             break
     return rec
+
+
+# ---------------------------------------------------------------------------
+#  Revision snapshots (lightweight versioning)
+# ---------------------------------------------------------------------------
+
+REVISIONS_DIR = "~/.sebastian/skill-revisions"
+MAX_REVISIONS_PER_SKILL = 20
+
+
+def _revisions_dir():
+    return _resolve_expanduser(REVISIONS_DIR)
+
+
+# Names that have >1 source path (e.g. a .system built-in + a user copy).
+# Populated by scan() before it saves revisions; used to disambiguate dirs.
+_COLLIDING_NAMES = set()
+
+
+def _skill_revision_dir(skill_name, path=""):
+    """Revision dir per skill. Same-named skills (e.g. .system vs. user)
+    get a path-keyed subdirectory so their histories don't mix."""
+    base = skill_name
+    if path and skill_name in _COLLIDING_NAMES:
+        base = f"{skill_name}__{hashlib.sha1(path.encode('utf-8')).hexdigest()[:6]}"
+    return os.path.join(_revisions_dir(), base)
+
+
+def _file_hash(text):
+    """SHA-256 hash of file content (bytes-safe via UTF-8)."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _stamp():
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def save_revision(skill_name, content, path=""):
+    """Save a revision snapshot for a skill. Returns revision filename or None if skipped."""
+    rev_dir = _skill_revision_dir(skill_name, path)
+    Path(rev_dir).mkdir(parents=True, exist_ok=True)
+
+    content_hash = _file_hash(content)
+    short_hash = content_hash[:8]
+
+    # Check if last revision has same hash → skip
+    existing = sorted(f for f in os.listdir(rev_dir) if f.endswith(".md"))
+    if existing:
+        last = existing[-1]
+        # Filename format: YYYYMMDDTHHMMSSZ_<hash>.md
+        last_hash = last.rsplit("_", 1)[-1].replace(".md", "") if "_" in last else ""
+        if last_hash == short_hash:
+            return None  # unchanged
+
+    fname = f"{_stamp()}_{short_hash}.md"
+    fpath = os.path.join(rev_dir, fname)
+    with open(fpath, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    # Trim old revisions if over limit
+    all_revs = sorted(f for f in os.listdir(rev_dir) if f.endswith(".md"))
+    if len(all_revs) > MAX_REVISIONS_PER_SKILL:
+        for old in all_revs[: len(all_revs) - MAX_REVISIONS_PER_SKILL]:
+            try:
+                os.remove(os.path.join(rev_dir, old))
+            except OSError:
+                pass
+
+    return fname
+
+
+def _find_revision_dirs(skill_name):
+    """Find all revision directories for a skill (handles path-keyed dirs
+    for same-named skills). Returns a list of dir paths."""
+    rev_dir = _skill_revision_dir(skill_name)
+    if os.path.isdir(rev_dir):
+        return [rev_dir]
+    # No plain dir — try path-keyed variants: <name>__<hash6>
+    base_dir = _revisions_dir()
+    if not os.path.isdir(base_dir):
+        return []
+    import glob
+    found = glob.glob(os.path.join(base_dir, f"{skill_name}__*"))
+    return [d for d in found if os.path.isdir(d)]
+
+
+def list_revisions(skill_name):
+    """List all saved revisions for a skill, newest first.
+    For same-named skills, merges results from all path-keyed dirs."""
+    dirs = _find_revision_dirs(skill_name)
+    results = []
+    for d in dirs:
+        files = sorted(
+            (f for f in os.listdir(d) if f.endswith(".md")),
+            reverse=True,
+        )
+        for f in files:
+            fpath = os.path.join(d, f)
+            parts = f.replace(".md", "").split("_", 1)
+            ts = parts[0] if parts else "?"
+            h = parts[1] if len(parts) > 1 else ""
+            size = os.path.getsize(fpath)
+            results.append({"filename": f, "timestamp": ts, "hash": h,
+                           "size": size, "dir": os.path.basename(d)})
+    results.sort(key=lambda r: r["timestamp"], reverse=True)
+    return results
+
+
+def revert_revision(skill_name, revision_name, target_path=None):
+    """Restore a skill's SKILL.md from a revision snapshot.
+    Returns (success: bool, target_path: str)."""
+    # Find the revision file across all candidate dirs
+    rev_path = None
+    for d in _find_revision_dirs(skill_name):
+        candidate = os.path.join(d, revision_name)
+        if os.path.exists(candidate):
+            rev_path = candidate
+            break
+    if rev_path is None:
+        return False, f"Revision not found: {revision_name}"
+
+    # Find current SKILL.md path from index if not provided
+    if target_path is None:
+        index_path = _default_index_path()
+        old_index = load_old_index(index_path)
+        rec = old_index.get(skill_name)
+        if not rec or not rec.get("path"):
+            return False, f"Skill '{skill_name}' not found in index, can't determine target path"
+        target_path = rec["path"]
+
+    if not os.path.exists(target_path):
+        return False, f"Target file missing: {target_path}"
+
+    # First, snapshot current state as a revision too (so revert itself is undoable)
+    with open(target_path, "r", encoding="utf-8") as f:
+        current = f.read()
+    save_revision(skill_name, current, path=target_path)
+
+    # Copy revision content over
+    shutil.copy2(rev_path, target_path)
+    return True, target_path
+
+
+def revisions_status():
+    """Print summary of all skill revisions."""
+    rev_dir = _revisions_dir()
+    if not os.path.isdir(rev_dir):
+        print("(no revisions yet — run --scan to create first snapshots)")
+        return
+
+    skills = sorted(d for d in os.listdir(rev_dir)
+                    if os.path.isdir(os.path.join(rev_dir, d)))
+    if not skills:
+        print("(no revisions yet)")
+        return
+
+    total = 0
+    total_size = 0
+    print(f"{'Skill':<30} {'Revisions':>10}  {'Latest':<18}  {'Size':>8}")
+    print("-" * 72)
+    for s in skills:
+        revs = list_revisions(s)
+        n = len(revs)
+        total += n
+        latest = revs[0]["timestamp"] if revs else "-"
+        size = sum(r["size"] for r in revs)
+        total_size += size
+        size_str = f"{size/1024:.1f}K" if size < 1024*1024 else f"{size/1024/1024:.1f}M"
+        print(f"{s:<30} {n:>10}  {latest:<18}  {size_str:>8}")
+    print("-" * 72)
+    total_str = f"{total_size/1024:.1f}K" if total_size < 1024*1024 else f"{total_size/1024/1024:.1f}M"
+    print(f"{'TOTAL':<30} {total:>10}  {'':<18}  {total_str:>8}")
+    print(f"\n(per-skill cap: {MAX_REVISIONS_PER_SKILL} revisions)")
 
 
 # ---------------------------------------------------------------------------
@@ -452,12 +636,24 @@ def scan(config_path=None):
 
     # Load old index to preserve usage_count
     old_index = load_old_index(index_path)
+    old_by_key = load_old_index_by_key(index_path)
 
     # --- Discover skills ---
     files = discover_skill_files(skill_paths)
     print(f"[scan] Found {len(files)} SKILL.md file(s)", file=sys.stderr)
 
+    # Detect same-named skills with different source paths so their
+    # revision histories don't mix (e.g. a .system built-in + a user copy).
+    global _COLLIDING_NAMES
+    _COLLIDING_NAMES = set()
+    _name_paths = {}
+    for fp in files:
+        name = os.path.basename(os.path.dirname(fp)) or os.path.splitext(os.path.basename(fp))[0]
+        _name_paths.setdefault(name, set()).add(fp)
+    _COLLIDING_NAMES = {n for n, ps in _name_paths.items() if len(ps) > 1}
+
     records = []
+    new_revisions = 0
     for fp in files:
         with open(fp, "r", encoding="utf-8") as f:
             text = f.read()
@@ -472,14 +668,35 @@ def scan(config_path=None):
         # Set type
         rec["type"] = "skill"
 
+        # Content hash & revision snapshot
+        content_hash = _file_hash(text)
+        rec["content_hash"] = content_hash
+        old_rec = _find_old_rec(rec["name"], fp, old_index, old_by_key)
+
+        # Save revision if content changed (or first scan)
+        if not old_rec or old_rec.get("content_hash") != content_hash:
+            rev_name = save_revision(rec["name"], text, path=fp)
+            if rev_name:
+                rec["last_revision"] = rev_name
+                old_count = old_rec.get("revision_count", 0) if old_rec else 0
+                rec["revision_count"] = old_count + 1
+                new_revisions += 1
+            else:
+                # Hash matches last revision (shouldn't happen often but handle it)
+                rec["last_revision"] = old_rec.get("last_revision", "") if old_rec else ""
+                rec["revision_count"] = old_rec.get("revision_count", 0) if old_rec else 0
+        else:
+            rec["last_revision"] = old_rec.get("last_revision", "")
+            rec["revision_count"] = old_rec.get("revision_count", 0)
+
         # Merge usage_count from old index
-        old_rec = old_index.get(rec["name"])
         if old_rec:
             rec["usage_count"] = old_rec.get("usage_count", 0)
 
         records.append(rec)
         src = "frontmatter" if fm_text else "body"
-        print(f"  [skill] {rec['name']}", file=sys.stderr)
+        changed = " [changed]" if (not old_rec or old_rec.get("content_hash") != content_hash) else ""
+        print(f"  [skill] {rec['name']}{changed}", file=sys.stderr)
 
     # --- Discover external tools ---
     ext_files = discover_external_tools(ext_dir)
@@ -515,6 +732,8 @@ def scan(config_path=None):
     ext_tools = sum(1 for r in records if r.get('type') == 'external_tool')
     plugins = sum(1 for r in records if r.get('type') == 'plugin')
     print(f"\n[scan] Done. {len(records)} tool(s) indexed ({skills} skills, {ext_tools} external tools, {plugins} plugins).", file=sys.stderr)
+    if new_revisions:
+        print(f"[scan] {new_revisions} skill(s) changed → revision snapshot saved.", file=sys.stderr)
     return records
 
 
@@ -533,6 +752,46 @@ def load_old_index(index_path):
         return {r["name"]: r for r in data if r.get("name")}
     except (json.JSONDecodeError, KeyError, TypeError):
         return {}
+
+
+def load_old_index_by_key(index_path):
+    """Load index keyed by (name, path) for skills that share a name.
+
+    Returns a dict: {name: [record, ...]}  where each record has its original
+    path.  Used by scan() to match the *same physical file* even when two
+    SKILL.md files happen to have the same skill name (e.g. .system vs user)."""
+    if not os.path.exists(index_path):
+        return {}
+    try:
+        with open(index_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        result = {}
+        if isinstance(data, dict):
+            # Legacy: {name: record}  → wrap in list
+            for name, rec in data.items():
+                result.setdefault(name, []).append(rec)
+        else:
+            for rec in data:
+                name = rec.get("name")
+                if name:
+                    result.setdefault(name, []).append(rec)
+        return result
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return {}
+
+
+def _find_old_rec(name, path, old_index, old_by_key):
+    """Find the old record matching a specific (name, path) or fall back to name only."""
+    # Try exact (name, path) match first
+    candidates = old_by_key.get(name, [])
+    if candidates:
+        for c in candidates:
+            if c.get("path") == path:
+                return c
+        # name match but path differs → still better than nothing
+        return candidates[0]
+    # Fall back to legacy name-only
+    return old_index.get(name)
 
 
 # ---------------------------------------------------------------------------
@@ -565,12 +824,13 @@ def cmd_list(index_path=None):
     src_w = max(len(r.get("source", "") or "") for r in records)
     src_w = max(src_w, 6) + 2
     cnt_w = 6
+    rev_w = 5
 
-    sep = "+" + "-" * (name_w + 2) + "+" + "-" * (type_w + 2) + "+" + "-" * (ver_w + 2) + "+" + "-" * (src_w + 2) + "+" + "-" * cnt_w + "+"
+    sep = "+" + "-" * (name_w + 2) + "+" + "-" * (type_w + 2) + "+" + "-" * (ver_w + 2) + "+" + "-" * (src_w + 2) + "+" + "-" * cnt_w + "+" + "-" * rev_w + "+"
 
     # Header
     print(sep)
-    print(f"| {'Name'.ljust(name_w - 1)}| {'Type'.ljust(type_w - 1)}| {'Version'.ljust(ver_w - 1)}| {'Source'.ljust(src_w - 1)}| {'Uses'.ljust(cnt_w - 1)}|")
+    print(f"| {'Name'.ljust(name_w - 1)}| {'Type'.ljust(type_w - 1)}| {'Version'.ljust(ver_w - 1)}| {'Source'.ljust(src_w - 1)}| {'Uses'.ljust(cnt_w - 1)}| {'Rev'.ljust(rev_w - 1)}|")
     print(sep.replace("-", "="))
 
     for r in records:
@@ -579,13 +839,16 @@ def cmd_list(index_path=None):
         ver = (r.get("version") or "")[: ver_w]
         src = (r.get("source") or "")[: src_w]
         cnt = str(r.get("usage_count", 0))
-        print(f"| {name.ljust(name_w - 1)}| {rtype.ljust(type_w - 1)}| {ver.ljust(ver_w - 1)}| {src.ljust(src_w - 1)}| {cnt.rjust(cnt_w - 2)} |")
+        rev = str(r.get("revision_count", 0) or "-")
+        print(f"| {name.ljust(name_w - 1)}| {rtype.ljust(type_w - 1)}| {ver.ljust(ver_w - 1)}| {src.ljust(src_w - 1)}| {cnt.rjust(cnt_w - 2)} | {rev.rjust(rev_w - 2)} |")
 
     print(sep)
     skills = sum(1 for r in records if r.get("type") == "skill")
     ext = sum(1 for r in records if r.get("type") == "external_tool")
     plugins = sum(1 for r in records if r.get("type") == "plugin")
+    total_rev = sum(r.get("revision_count", 0) for r in records if r.get("type") == "skill")
     print(f"{len(records)} tool(s) ({skills} skills, {ext} external tools, {plugins} plugins)")
+    print(f"Total skill revisions: {total_rev} (see --revisions or --history <skill>)")
 
 
 # ---------------------------------------------------------------------------
@@ -640,6 +903,215 @@ def cmd_find(keyword, index_path=None):
         if extra:
             print(extra)
         print()
+
+
+def _load_lessons_stats():
+    """Aggregate skill statistics from lessons.json (both flat and archive).
+
+    Returns dict: {skill_name: {ok, modified, failed, total, last_used,
+                                fallback_count, rung_failures: {skill, template, harness}}}
+    """
+    lessons_path = os.path.join(_sebastian_dir(), "lessons.json")
+    archive_path = os.path.join(_sebastian_dir(), "lessons-archive.json")
+    stats = {}
+
+    def _record_skill(skill, result, timestamp, has_fallback=False, rung=None):
+        if skill not in stats:
+            stats[skill] = {"ok": 0, "modified": 0, "failed": 0, "total": 0,
+                            "last_used": "", "fallback_count": 0,
+                            "rung_failures": {"skill": 0, "template": 0, "harness": 0}}
+        s = stats[skill]
+        s["total"] += 1
+        if result in s:
+            s[result] += 1
+        if timestamp and (not s["last_used"] or timestamp > s["last_used"]):
+            s["last_used"] = timestamp
+        if has_fallback:
+            s["fallback_count"] += 1
+        if rung and rung in s["rung_failures"]:
+            s["rung_failures"][rung] += 1
+
+    # Flat lessons
+    if os.path.exists(lessons_path):
+        try:
+            with open(lessons_path, "r", encoding="utf-8") as f:
+                lessons = json.load(f)
+            if isinstance(lessons, list):
+                for r in lessons:
+                    result = r.get("result", "ok")
+                    ts = r.get("timestamp", "")
+                    wf = r.get("workflow") or []
+                    has_fb = bool(r.get("fallback") or r.get("fallback_reason")
+                                  or r.get("fallback_chain"))
+                    rung = r.get("rung") if result == "failed" else None
+                    for skill in wf:
+                        _record_skill(skill, result, ts, has_fb, rung)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Archive digests (stats only, not individual records)
+    if os.path.exists(archive_path):
+        try:
+            with open(archive_path, "r", encoding="utf-8") as f:
+                archive = json.load(f)
+            digests = archive.get("digests", []) if isinstance(archive, dict) else []
+            for d in digests:
+                skill = d.get("skill", "unknown")
+                st = d.get("stats", {})
+                period = d.get("period", "")
+                # Extract end date from period "YYYY-MM-DD ~ YYYY-MM-DD"
+                end_date = period.split("~")[-1].strip() if "~" in period else period
+                ts = end_date + "T23:59:59Z" if end_date else ""
+                fb_count = sum(item.get("count", 0) for item in d.get("fallback_top", []))
+                for result in ("ok", "modified", "failed"):
+                    count = st.get(result, 0)
+                    for _ in range(count):
+                        _record_skill(skill, result, ts, fb_count > 0)
+        except (json.JSONDecodeError, OSError, TypeError):
+            pass
+
+    return stats
+
+
+def _days_since(iso_timestamp):
+    """Approximate days since an ISO timestamp string. Returns None if invalid."""
+    if not iso_timestamp:
+        return None
+    try:
+        # Handle various formats
+        ts_str = iso_timestamp.replace("Z", "+00:00")
+        if "T" not in ts_str:
+            ts_str = ts_str + "T00:00:00+00:00"
+        then = datetime.fromisoformat(ts_str)
+        now = datetime.now(timezone.utc)
+        delta = now - then
+        return delta.days
+    except (ValueError, TypeError):
+        return None
+
+
+def cmd_health(index_path=None):
+    """Skill health dashboard: usage, success rate, activity, failures."""
+    path = _resolve_expanduser(index_path or _default_index_path())
+    if not os.path.exists(path):
+        print("Index not found. Run --scan first.", file=sys.stderr)
+        return
+
+    with open(path, "r", encoding="utf-8") as f:
+        records = json.load(f)
+
+    stats = _load_lessons_stats()
+    skills = [r for r in records if r.get("type") == "skill"]
+    ext_tools = [r for r in records if r.get("type") in ("external_tool", "plugin")]
+
+    if not skills:
+        print("(no skills in index)")
+        return
+
+    # Merge index usage_count with lessons stats
+    for s in skills:
+        name = s["name"]
+        if name in stats:
+            s["_health"] = stats[name]
+        else:
+            s["_health"] = {"ok": 0, "modified": 0, "failed": 0, "total": 0,
+                            "last_used": "", "fallback_count": 0,
+                            "rung_failures": {"skill": 0, "template": 0, "harness": 0}}
+
+    total_lessons = sum(s["_health"]["total"] for s in skills)
+    total_ok = sum(s["_health"]["ok"] for s in skills)
+    total_modified = sum(s["_health"]["modified"] for s in skills)
+    total_failed = sum(s["_health"]["failed"] for s in skills)
+    total_fallback = sum(s["_health"]["fallback_count"] for s in skills)
+
+    print()
+    print("Sebastian Skill Health Dashboard")
+    print("=" * 60)
+    print(f"  Skills indexed:  {len(skills)}")
+    print(f"  External tools:  {len(ext_tools)}")
+    print(f"  Total lesson records: {total_lessons}")
+    if total_lessons > 0:
+        ok_pct = total_ok * 100 // total_lessons
+        mod_pct = total_modified * 100 // total_lessons
+        fail_pct = total_failed * 100 // total_lessons
+        fb_pct = total_fallback * 100 // total_lessons
+        print(f"    ok={total_ok} ({ok_pct}%)  modified={total_modified} ({mod_pct}%)  "
+              f"failed={total_failed} ({fail_pct}%)  fallback={total_fallback} ({fb_pct}%)")
+
+    # --- Most used skills ---
+    print()
+    print("📊  Most Used (by lesson records)")
+    print("-" * 60)
+    by_usage = sorted(skills, key=lambda s: -s["_health"]["total"])
+    rank = 1
+    for s in by_usage[:10]:
+        h = s["_health"]
+        if h["total"] == 0:
+            break
+        days = _days_since(h["last_used"])
+        days_str = f"{days}d ago" if days is not None else "?"
+        bar_len = 20
+        filled = int(bar_len * h["total"] / max(by_usage[0]["_health"]["total"], 1))
+        bar = "█" * filled + "░" * (bar_len - filled)
+        print(f"  {rank:>2}. {s['name']:<28} {bar}  {h['total']:>3}  ({days_str})")
+        rank += 1
+    if rank == 1:
+        print("  (no usage data yet)")
+
+    # --- High failure rate ---
+    print()
+    print("⚠️  High Failure Rate (>=30%, min 2 records)")
+    print("-" * 60)
+    fail_list = [s for s in skills
+                 if s["_health"]["total"] >= 2
+                 and s["_health"]["failed"] > 0
+                 and s["_health"]["failed"] / s["_health"]["total"] >= 0.3]
+    fail_list.sort(key=lambda s: -s["_health"]["failed"] / s["_health"]["total"])
+    if fail_list:
+        for s in fail_list[:10]:
+            h = s["_health"]
+            rate = h["failed"] * 100 // h["total"]
+            rungs = h["rung_failures"]
+            rung_str = ", ".join(f"{k}:{v}" for k, v in rungs.items() if v > 0) or "n/a"
+            print(f"  {s['name']:<28}  {h['failed']}/{h['total']} ({rate}%)  rungs: {rung_str}")
+    else:
+        print("  ✓ No skills with high failure rate (or insufficient data)")
+
+    # --- High modification rate (candidates for upgrade) ---
+    print()
+    print("🔧  High Modification Rate (>=40%, min 2 records)")
+    print("-" * 60)
+    mod_list = [s for s in skills
+                if s["_health"]["total"] >= 2
+                and s["_health"]["modified"] > 0
+                and s["_health"]["modified"] / s["_health"]["total"] >= 0.4]
+    mod_list.sort(key=lambda s: -s["_health"]["modified"] / s["_health"]["total"])
+    if mod_list:
+        for s in mod_list[:10]:
+            h = s["_health"]
+            rate = h["modified"] * 100 // h["total"]
+            print(f"  {s['name']:<28}  {h['modified']}/{h['total']} ({rate}%) → 升级候选")
+    else:
+        print("  (no skills with high modification rate yet)")
+
+    # --- Inactive skills (never used or >90d unused) ---
+    print()
+    print("💤  Inactive / Never Used (in index but no lesson records)")
+    print("-" * 60)
+    never_used = [s for s in skills if s["_health"]["total"] == 0]
+    # Also count from usage_count field (legacy / index-only metric)
+    index_never_used = [s for s in skills if s.get("usage_count", 0) == 0
+                        and s["_health"]["total"] == 0]
+    print(f"  Never used (no lessons): {len(never_used)}/{len(skills)} skills")
+    if never_used:
+        # Show first 15
+        for s in never_used[:15]:
+            print(f"    · {s['name']}")
+        if len(never_used) > 15:
+            print(f"    …and {len(never_used) - 15} more")
+
+    print()
+    print("Tip: 运行 /sebastian review 查看升级推荐 (按失败定级)")
 
 
 def cmd_diagnose(index_path=None):
@@ -784,9 +1256,71 @@ def main():
         cmd_find(sys.argv[2])
     elif command == "--diagnose":
         cmd_diagnose()
+    elif command == "--health":
+        cmd_health()
+    elif command == "--revisions":
+        revisions_status()
+    elif command == "--history":
+        if len(sys.argv) < 3:
+            print("Usage: python3 scan.py --history <skill-name>")
+            sys.exit(1)
+        skill = sys.argv[2]
+        revs = list_revisions(skill)
+        if not revs:
+            print(f"No revisions found for '{skill}' (run --scan first to create snapshots)")
+        else:
+            print(f"Revisions for '{skill}' ({len(revs)} total, newest first):")
+            print()
+            print(f"{'#':>3}  {'Timestamp':<18}  {'Hash':<10}  {'Size':>8}  Filename")
+            print("-" * 70)
+            for i, r in enumerate(revs, 1):
+                size_str = f"{r['size']}B" if r['size'] < 1024 else f"{r['size']/1024:.1f}K"
+                print(f"{i:>3}  {r['timestamp']:<18}  {r['hash']:<10}  {size_str:>8}  {r['filename']}")
+            print()
+            print("To revert: python3 scan.py --revert <skill-name> <filename>")
+    elif command == "--revert":
+        if len(sys.argv) < 4:
+            print("Usage: python3 scan.py --revert <skill-name> <revision-filename>")
+            print("  (find filename with --history <skill-name>)")
+            sys.exit(1)
+        skill = sys.argv[2]
+        revision = sys.argv[3]
+        # Pre-check before asking
+        rev_dir = _skill_revision_dir(skill)
+        rev_path = os.path.join(rev_dir, revision)
+        if not os.path.exists(rev_path):
+            print(f"ERROR: revision not found: {revision}")
+            print(f"  Path checked: {rev_path}")
+            sys.exit(1)
+
+        # Show what's about to happen
+        index_path = _default_index_path()
+        old_index = load_old_index(index_path)
+        rec = old_index.get(skill)
+        target = rec.get("path", "?") if rec else "?"
+        print(f"About to revert '{skill}':")
+        print(f"  Target file: {target}")
+        print(f"  Revert to:   {revision}")
+        print()
+        print("WARNING: This will overwrite the current SKILL.md with the revision content.")
+        print("  (current state will be saved as a new revision first, so revert is undoable)")
+        print()
+        # Require confirmation via --yes flag (non-interactive for safety)
+        if len(sys.argv) >= 5 and sys.argv[4] == "--yes":
+            ok, msg = revert_revision(skill, revision)
+            if ok:
+                print(f"Reverted '{skill}' → {msg}")
+                print("Run --scan to rebuild the index.")
+            else:
+                print(f"ERROR: {msg}")
+                sys.exit(1)
+        else:
+            print("To confirm, re-run with --yes at the end:")
+            print(f"  python3 scan.py --revert {skill} {revision} --yes")
     else:
         print(f"Unknown command: {command}")
-        print("Available: --scan, --scan-external, --scan-plugins, --list, --find <keyword>, --diagnose")
+        print("Available: --scan, --scan-external, --scan-plugins, --list, --find <keyword>,")
+        print("           --diagnose, --health, --revisions, --history <skill>, --revert <skill> <rev>")
         sys.exit(1)
 
 
