@@ -41,12 +41,17 @@
 
 | 命令 | 说明 |
 |------|------|
-| `/sebastian <任务描述>` | 核心命令 — 分析任务，从索引中找到匹配的 skills，规划工作流，分步执行 |
-| `/sebastian update index` | 更新索引 — 重新扫描全部路径，重建 index.json |
-| `/sebastian list` | 查看索引 — 列出索引中所有 skills 摘要表 |
+| `/sebastian <任务描述>` | 核心命令 — 分析任务，双层匹配（TF-IDF 召回 + 模型精排）从索引中找到匹配的 skills，规划工作流，分步执行 |
+| `/sebastian update index` | 更新索引 — 重新扫描全部路径，重建 index.json（自动存修订快照） |
+| `/sebastian list` | 查看索引 — 列出索引中所有 skills 摘要表（含 Rev 列） |
 | `/sebastian find <关键词>` | 搜索技能 — 按名称/标签/场景搜索技能 |
 | `/sebastian diagnose index` | 索引健康度诊断 — 检查各技能的 frontmatter 字段完整性，输出缺失统计 |
-| `/sebastian review` | 审查学习日志 — 查看 lessons.json，推荐需要升级的技能（联动 skill-rpg-loop） |
+| `/sebastian review` | 审查学习日志 — 查看 lessons.json，按失败定级推荐需要升级的技能（联动 skill-rpg-loop） |
+| `/sebastian bench` | 路由评测基准 — 固定用例集量化匹配质量（hit@1/hit@3/分层/TF-IDF 召回率/回归告警） |
+| `/sebastian compact lessons` | 压缩学习日志 — lessons 超阈值后按技能分桶锚定摘要归档 |
+| `/sebastian revisions` | 查看/回滚技能修订历史 — 列出修订、回滚到指定版本 |
+| `/sebastian health` | 技能健康度面板 — 聚合 ok/modified/failed/fallback 统计、回退率、失败 rung 分布 |
+| `/sebastian recommend <任务>` | 双层技能推荐 — TF-IDF 召回 + 模型精排 prompt（v3.0.0） |
 
 ## 项目结构
 
@@ -60,7 +65,11 @@ D:\Projects\Sebastian-agent\     ← 项目源码根目录
 │   ├── career-ops.json           ← career-ops 外部工具描述
 │   └── webnovel-writer.json      ← webnovel-writer 插件描述
 ├── scripts/
-│   └── scan.py                   ← 索引扫描脚本（开发版）
+│   ├── scan.py                   ← 索引扫描脚本
+│   ├── match_cache.py            ← TF-IDF 召回 + 匹配缓存（v3.0.0 双层架构）
+│   ├── bench.py                  ← 路由评测
+│   ├── compact_lessons.py        ← 学习日志压缩归档
+│   └── enrich_frontmatter.py     ← 元数据增强
 └── install.sh                    ← 安装脚本（部署到 ~/.claude/skills/ + ~/.sebastian/）
 ```
 
@@ -152,7 +161,7 @@ update_method:
 {
   "name": "career-ops",
   "type": "external_tool",
-  "path": "D:/Projects/career-ops",
+  "path": "<career-ops 安装目录>",
   "description": "AI 求职自动化工具集",
   "version": "1.20.0",
   "tags": ["job-search", "career"],
@@ -160,7 +169,7 @@ update_method:
   "scenarios": "找工作、求职、面试准备",
   "keywords": ["找工作", "求职", "job", "career"],
   "invoke_type": "command",
-  "invoke_cwd": "D:/Projects/career-ops",
+  "invoke_cwd": "<career-ops 安装目录>",
   "invoke_template": "node {{script}}",
   "subcommands": {
     "scan": "搜索职位 — node scan.mjs",

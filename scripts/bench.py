@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
-Sebastian — Router Benchmark Tool (v2.6.0)
+Sebastian — Router Benchmark Tool (v3.0.0)
 
 Measures routing accuracy: model-produced predictions per benchmark case are
 scored against expected skills. Deterministic checks run BEFORE model judging.
+
+v3.0.0 additions:
+    --tfidf-recall: runs TF-IDF Layer 1 against bench cases, reports
+        hit@1/hit@3 for the deterministic retrieval layer only
+        (isolates recall quality from model scoring).
 
 Workflow (executed by Claude per SKILL.md):
     /sebastian bench
@@ -12,11 +17,13 @@ Workflow (executed by Claude per SKILL.md):
               model reads bench.exam.json ONLY (never the full bench.json),
               runs Phase-1 weighted matching per case, writes predictions JSON
       step 3: python3 bench.py score <predictions.json>
+      step 4 (new): python3 bench.py tfidf-recall   # deterministic layer only
 
 Usage:
     python3 bench.py validate [--bench <bench.json>]
     python3 bench.py exam [--bench <bench.json>] [--out <path>]
     python3 bench.py score <predictions.json> [--bench <bench.json>]
+    python3 bench.py tfidf-recall [--bench <bench.json>]
     python3 bench.py history
 
 Exit codes: 0 = ok (report printed; regression/absolute alarms are textual),
@@ -32,6 +39,13 @@ from datetime import datetime, timezone
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
+
+# v3.0.0: TF-IDF layer (optional — falls back to "not installed" gracefully)
+try:
+    import match_cache
+    HAS_TFIDF = True
+except ImportError:
+    HAS_TFIDF = False
 
 # ---------------------------------------------------------------------------
 # Sandbox-aware path resolution (mirrors scan.py — keep in sync)
@@ -345,6 +359,97 @@ def show_history():
               f"{'⚠️' if run['regressed'] else ''}")
 
 
+def tfidf_recall(bench_path):
+    """Run TF-IDF Layer 1 against bench cases and report deterministic-layer recall.
+
+    Measures: for each EXACT case, does the TF-IDF top-1 / top-3 contain the
+    expected skill? This isolates retrieval quality from model scoring.
+    """
+    if not HAS_TFIDF:
+        print("[bench] tfidf-recall requires match_cache module — not found in scripts/",
+              file=sys.stderr)
+        sys.exit(2)
+
+    bench = load_json(bench_path, "benchmark dataset")
+    index_path = _default_index_path()
+    if not os.path.exists(index_path):
+        print("[bench] index.json not found — run '/sebastian update index' first",
+              file=sys.stderr)
+        sys.exit(2)
+
+    with open(index_path, encoding="utf-8") as f:
+        records = json.load(f)
+
+    cases = bench.get("cases", [])
+    if not cases:
+        print("[bench] No cases in bench.json", file=sys.stderr)
+        sys.exit(2)
+
+    results = []
+    for case in cases:
+        case_id = case.get("id", "?")
+        prompt = case.get("prompt", "")
+        level = case.get("expected_level", "EXACT").upper()
+        expected = set(case.get("expected_skills") or [])
+
+        if not prompt:
+            continue
+
+        rec = match_cache.recommend(prompt, records, top_k=20)
+        candidates = rec.get("candidates", [])
+        top1 = [c["name"] for c in candidates[:1]]
+        top3 = [c["name"] for c in candidates[:3]]
+
+        if level == "NOMATCH":
+            # NOMATCH: TF-IDF should return empty recommended list
+            hit = len(candidates) == 0 or (not rec.get("recommended"))
+            hit3 = hit
+        else:
+            hit = bool(top1) and top1[0] in expected
+            hit3 = any(name in expected for name in top3)
+
+        results.append({
+            "id": case_id,
+            "level": level,
+            "expected": sorted(expected),
+            "top1": top1,
+            "top3": top3,
+            "hit": hit,
+            "hit3": hit3,
+            "tfidf_method": rec.get("method", "?"),
+        })
+
+    total = len(results)
+    hits1 = sum(1 for r in results if r["hit"])
+    hits3 = sum(1 for r in results if r["hit3"])
+    overall1 = hits1 / total if total else 0.0
+    overall3 = hits3 / total if total else 0.0
+
+    print("┌─────────────────────────────────────────────┐")
+    print("│  TF-IDF 确定性层召回报告 (v3.0.0)            │")
+    print("├─────────────────────────────────────────────┤")
+    print(f"│  用例: {total}  EXACT {sum(1 for r in results if r['level'] != 'NOMATCH')}  NOMATCH {sum(1 for r in results if r['level'] == 'NOMATCH')}")
+    print(f"│  hit@1 = {hits1}/{total} ({overall1:.0%})   hit@3 = {hits3}/{total} ({overall3:.0%})")
+    print("├─────────────────────────────────────────────┤")
+
+    # Per-case detail
+    for r in results:
+        status = "✓" if r["hit"] else "✗"
+        print(f"  {status} #{r['id']} [{r['level']}]  expected={r['expected']}  top1={r['top1']}")
+
+    miss = [r for r in results if not r["hit"]]
+    if miss:
+        print(f"\nMiss ({len(miss)}/{total}):")
+        for r in miss:
+            print(f"  #{r['id']} [{r['level']}]  expected={r['expected']}  top1={r['top1']}")
+
+    print("\n[bench] TF-IDF 层指标说明:")
+    print("  hit@1: top-1 候选是否在 expected_skills 中 (EXACT) / 是否为空 (NOMATCH)")
+    print("  hit@3: top-3 候选中任一是否在 expected_skills 中 (EXACT)")
+    print("  此指标衡量纯确定性召回质量，不含模型精排效果")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description="Sebastian router benchmark")
     ap.add_argument("--bench", default=None, help="bench.json path")
@@ -352,6 +457,7 @@ def main():
 
     sub.add_parser("validate", help="deterministic checks on dataset + index")
     sub.add_parser("history", help="show past bench runs")
+    sub.add_parser("tfidf-recall", help="v3.0.0: TF-IDF deterministic layer recall")
 
     sp = sub.add_parser("score", help="score model predictions against bench.json")
     sp.add_argument("predictions", help="predictions JSON file")
@@ -372,6 +478,8 @@ def main():
         exam(bench_path, args.out)
     elif args.cmd == "score":
         sys.exit(score(os.path.abspath(args.predictions), bench_path))
+    elif args.cmd == "tfidf-recall":
+        sys.exit(tfidf_recall(bench_path))
 
 
 if __name__ == "__main__":

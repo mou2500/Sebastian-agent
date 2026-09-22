@@ -11,6 +11,7 @@ Usage:
     python3 scan.py --find <kw>     # Search by name/tags/capabilities/scenarios
     python3 scan.py --diagnose      # Print index health report
     python3 scan.py --scan-plugins  # List installed plugins from cache
+    python3 scan.py --recommend <task>  # Two-layer TF-IDF + model recommendation (v3.0.0)
 """
 
 import hashlib
@@ -21,6 +22,12 @@ import shutil
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
+
+# v3.0.0: TF-IDF matching engine
+try:
+    import match_cache
+except ImportError:
+    match_cache = None
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -852,6 +859,42 @@ def cmd_list(index_path=None):
 
 
 # ---------------------------------------------------------------------------
+#  CLI: --recommend (v3.0.0 two-layer matching)
+# ---------------------------------------------------------------------------
+
+
+def cmd_recommend(task, index_path=None):
+    """Two-layer skill recommendation.
+
+    Layer 1: TF-IDF deterministic retrieval (always available)
+    Layer 2: Cache hit OR model scoring prompt (Claude executes per SKILL.md)
+
+    Output: JSON to stdout.
+    """
+    path = _resolve_expanduser(index_path or _default_index_path())
+    if not os.path.exists(path):
+        print("Index not found. Run --scan first.", file=sys.stderr)
+        sys.exit(1)
+
+    with open(path, "r", encoding="utf-8") as f:
+        records = json.load(f)
+
+    if match_cache is None:
+        print("ERROR: match_cache module not found in scripts/", file=sys.stderr)
+        sys.exit(1)
+
+    result = match_cache.recommend(task, records)
+
+    # If TF-IDF layer found candidates, build the model-layer prompt
+    # so Claude can score them (SKILL.md step 11 instructs Claude to do this)
+    if result["method"] == "tfidf" and result["candidates"]:
+        prompt = match_cache.format_rubric_prompt(task, result["candidates"])
+        result["model_layer_prompt"] = prompt
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+# ---------------------------------------------------------------------------
 #  CLI: --find
 # ---------------------------------------------------------------------------
 
@@ -1249,6 +1292,11 @@ def main():
         print(f"\n[scan-plugins] Done. {len(plugins)} plugin(s) found.", file=sys.stderr)
     elif command == "--list":
         cmd_list()
+    elif command == "--recommend":
+        if len(sys.argv) < 3:
+            print("Usage: python3 scan.py --recommend <task description>")
+            sys.exit(1)
+        cmd_recommend(sys.argv[2])
     elif command == "--find":
         if len(sys.argv) < 3:
             print("Usage: python3 scan.py --find <keyword>")
@@ -1320,7 +1368,8 @@ def main():
     else:
         print(f"Unknown command: {command}")
         print("Available: --scan, --scan-external, --scan-plugins, --list, --find <keyword>,")
-        print("           --diagnose, --health, --revisions, --history <skill>, --revert <skill> <rev>")
+        print("           --diagnose, --health, --revisions, --history <skill>, --revert <skill> <rev>,")
+        print("           --recommend <task>  (v3.0.0 two-layer TF-IDF + model recommendation)")
         sys.exit(1)
 
 

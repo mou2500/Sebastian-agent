@@ -1,5 +1,80 @@
 # Changelog
 
+## 3.1.0 (2026-09-22)
+
+巡检修复 + 模板扩充（基于 `/sebastian` 索引健康诊断 + 工作流模板评估）
+
+- **修复 find-skill → find-skills 命名不一致（6 处）**
+  - 回退链第 3 步、无匹配报告、冲突边界表、集成指南均写 `find-skill`，但实际安装技能为 `find-skills`，回退链会落空
+  - 涉及行：frontmatter paired_with / 无匹配报告模板 / 回退链 / 冲突边界表 / 集成指南标题与正文
+
+- **补落地模板 L / 模板 M 正文**
+  - v3.0.0 维护者备注声明"新增模板 L(Sebastian 自维护流程) 与模板 M(金融研究流水线)"，但 SKILL.md 工作流模板章节中仅有 A–G/H/I/K，L/M 正文缺失（声明与实现不一致）
+  - 本次在模板 K 与"冲突边界"章节之间补写 L/M 完整正文（含触发条件、步骤、成功判定、约定），与 v3.0.0 声明对齐
+
+- **方案盒标题 v2 → v3**
+  - 4 处工作流方案展示盒（命令参考 + 3 个示例）仍写"Sebastian v2 工作流方案"，与 v3 版本不一致，统一改为"Sebastian v3 工作流方案"
+
+- **关键词触发规则去百分数**
+  - 外部工具/Plugin 的 EXACT/INDIRECT 触发标记移除旧版百分比数值（≥80%/50%），改为纯 EXACT/INDIRECT 定级，与 v3.0.0 固定 0-4 rubric（推荐阈值 ≥3）一致，避免与新阈值体系矛盾
+
+- **README / CONTEXT / install.sh 同步 v3.0.0**
+  - README 版本号 2.7.0 → 3.0.0，结构图补 match_cache.py / RESEARCH-matching.md，命令表补 recommend/health/revisions
+  - CONTEXT.md 命令表补全 v3.0.0 全部 11 条命令；项目结构图补全脚本清单
+  - install.sh 同步复制 match_cache.py（v3.0.0 双层匹配依赖），命令提示补全
+
+> 注：SKILL.md frontmatter 版本号保持 3.0.0（本次为 v3.0.0 发布后的巡检修复增量，未触发大版本）。仓库 CHANGELOG 序列为 3.0.0 → 3.1.0。
+
+---
+
+## 3.0.0 (2026-09-22)
+
+双层匹配架构(TF-IDF 确定性召回 + 模型语义精排 + 固定 rubric + 缓存 + fallback 链)
+
+> 来源: 对照 `kitze/skillbox` 的推荐引擎(src/server/recommendations.ts), 取其双层架构核心模式,
+> 以纯 Python 标准库 + 文件系统实现, 不引入 PostgreSQL/Jev/外部服务(遵守冲突消解规则 4)。
+> 研究文档: `sk/sebastian/RESEARCH-matching.md`
+
+- **Layer 1: TF-IDF 确定性召回** (`scripts/match_cache.py`)
+  - 中英文混合分词: 英文按词, 中文按单字 + bigram
+  - 字段权重: name=3, tags=2, description/capabilities=1.5, scenarios=1, keywords/subcommands(external_tool/plugin)=3/1.5
+  - 输出: top-20 候选, 归一化 score 0-4 (最高候选 = 4.0)
+  - 纯标准库实现, <10ms 完成, 无外部依赖
+  - `scan.py --recommend <task>` 输出 JSON: candidates + recommended + model_layer_prompt
+
+- **Layer 2: 模型精排(固定 rubric)**
+  - 0-4 分制(对齐 skillbox rubric), 推荐阈值 ≥3, EXACT=4 / INDIRECT=3 / NOMATCH=≤2
+  - 评分指令: "Match meaning, not keyword overlap. Unrelated tasks must score 0"
+  - 评分 prompt 由 `match_cache.format_rubric_prompt()` 自动生成, Claude 按 prompt 打分
+  - 模型层结果可缓存: 相同 task + index hash → 5min 内直接取结果
+
+- **缓存层** (`~/.sebastian/match-cache.json`)
+  - 5min TTL, 128 条上限, 超限淘汰最旧
+  - key = SHA256(task + index_hash + rubric_version)
+  - 文件级缓存(非进程内), 跨 session 有效
+
+- **Fallback 链**
+  - 模型不可用(超时/缺 key/catalog>200) → 降级为纯 TF-IDF 结果
+  - 输出标注 `method="tfidf"` + `fallback_reason`
+  - NOMATCH 候选为空时, 沿用现有 5 级回退链
+
+- **bench 扩展**: `bench.py tfidf-recall` 子命令
+  - 对 bench 用例集单独跑 TF-IDF Layer 1, 报告 hit@1/hit@3 (确定性层召回率)
+  - 隔离检索质量与模型评分, 便于定位召回瓶颈
+
+- **SKILL.md 更新**
+  - 版本 2.9.0 → 3.0.0
+  - Phase 1-9 重写: 原"加权匹配+三级定级" → "双层架构(召回→精排→fallback→缓存)"
+  - 新增命令 11 (`/sebastian recommend <task>`)
+  - 保护锚点第 3 条更新: 三级定级阈值 → 固定 0-4 rubric + 推荐阈值
+  - 新增保护锚点第 7 条: 双层匹配架构本身
+
+**后续(未做):**
+- 缓存命中率纳入 `/sebastian health` 面板(当前只有文件, 无统计入口)
+- 复合意图多技能排序的 bench 用例补充(对齐 skillbox "Reserve parking, then transcribe" 用例)
+
+---
+
 ## 2.9.0 (2026-09-22)
 
 借鉴 skillbox 三项轻量改进(版本化 / 回退显式化 / 使用统计健康度)
@@ -22,6 +97,15 @@
 - **SKILL.md**: 版本 2.8.0 → 2.9.0; 新增命令 9 (`/sebastian revisions`) 与 10 (`/sebastian health`); 概述第 6/7 条; Lessons 记录格式补 fallback 字段说明; 命令 5 加指向 health/revisions 的指针
 
 **后续(未做):** 技能匹配推荐方式的原理研究(确定性 TF-IDF + 模型语义微调双层架构) — 明日专项。
+
+**已完成 (2026-09-22):** 技能匹配推荐方式研究
+  - 对照 `kitze/skillbox` src/server/recommendations.ts: 双层架构(模型评分 + 确定性 FTS fallback)
+  - skillbox 模型层: Jev 专用评分 API (非 chat), 0-4 rubric, ≥3 纳入推荐, 8s 超时, 5min 缓存
+  - 确定性层: PostgreSQL FTS (tsvector), 索引 name/description
+  - Sebastian 当前: `scan.py --find` 纯字符串匹配(无字段权重/无 IDF) + Claude 自由推理(无固定 rubric/无缓存)
+  - 研究结论与改进方案: `RESEARCH-matching.md`
+  - P0: TF-IDF 替代 `--find` 字符串匹配; P1: 固定 0-4 评分 rubric + 缓存; P2: 双层协同(召回+精排); P3: bench 扩展
+  - 遵守冲突消解规则 4: 只取核心模式(TF-IDF/rubric/缓存/fallback), 不引入 PostgreSQL/Jev/服务栈
 
 ## 2.8.0 (2026-09-21)
 
@@ -86,7 +170,7 @@ P0 进化(借鉴 ACE: 路由可评测 + 记录压缩治理)
 - **修复** scan.py 沙箱路径兼容性 — 新增 `_real_home()` 自动检测真实用户目录，避开 Claude Code 临时 HOME
 - **修复** SKILL.md 全部 `~/.sebastian/` 引用替换为绝对路径，避免沙箱解析错误
 - **修复** install.sh 新增 `SEBASTIAN_HOME` 环境变量支持和真实目录自动检测
-- **修复** SKILL.md/install.sh 中命令路径改为直接使用 `/c/Users/mou25/.sebastian/`（沙箱内外一致）
+- **修复** SKILL.md/install.sh 中命令路径改为直接使用 `~/.sebastian/`（与 HOME 一致）
 
 ## 2.5.0 (2026-07-15)
 

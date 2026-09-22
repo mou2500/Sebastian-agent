@@ -12,6 +12,7 @@ set -euo pipefail
 SKILL_SRC="sk/sebastian/SKILL.md"
 SKILL_BUNDLE_SRC="sk/sebastian"
 SCAN_SRC="scripts/scan.py"
+MATCH_CACHE_SRC="scripts/match_cache.py"
 BENCH_SRC="scripts/bench.py"
 COMPACT_SRC="scripts/compact_lessons.py"
 BENCH_SEED_SRC="sk/sebastian/bench-cases.json"
@@ -32,6 +33,7 @@ SKILL_DST_DIR="$REAL_HOME/.claude/skills/sebastian"
 SKILL_DST="$SKILL_DST_DIR/SKILL.md"
 SEBASTIAN_DIR="$REAL_HOME/.sebastian"
 SCAN_DST="$SEBASTIAN_DIR/scan.py"
+MATCH_CACHE_DST="$SEBASTIAN_DIR/match_cache.py"
 BENCH_DST="$SEBASTIAN_DIR/bench.py"
 COMPACT_DST="$SEBASTIAN_DIR/compact_lessons.py"
 BENCH_DST_JSON="$SEBASTIAN_DIR/bench.json"
@@ -67,9 +69,9 @@ else
 fi
 
 # ------------------------------------------------------------------
-# 3. 复制脚本（scan / bench / compact）
+# 3. 复制脚本（scan / match_cache / bench / compact）
 # ------------------------------------------------------------------
-for src_dst in "$SCAN_SRC:$SCAN_DST" "$BENCH_SRC:$BENCH_DST" "$COMPACT_SRC:$COMPACT_DST"; do
+for src_dst in "$SCAN_SRC:$SCAN_DST" "$MATCH_CACHE_SRC:$MATCH_CACHE_DST" "$BENCH_SRC:$BENCH_DST" "$COMPACT_SRC:$COMPACT_DST"; do
     src="${src_dst%%:*}"
     dst="${src_dst#*:}"
     if [ -f "$src" ]; then
@@ -142,5 +144,9 @@ echo "  /sebastian update index  — 更新工具索引（技能 + 外部工具�
 echo "  /sebastian list          — 列出所有工具"
 echo "  /sebastian find <关键词>  — 搜索工具"
 echo "  /sebastian diagnose index— 索引健康诊断"
+echo "  /sebastian review        — 学习日志 + 升级推荐"
 echo "  /sebastian bench         — 路由评测基准"
 echo "  /sebastian compact lessons — 学习日志压缩归档"
+echo "  /sebastian revisions     — 技能修订历史"
+echo "  /sebastian health        — 技能健康度面板"
+echo "  /sebastian recommend <任务> — 双层技能推荐（TF-IDF 召回 + 模型精排）"
