@@ -47,7 +47,7 @@
 | `/sebastian find <关键词>` | 搜索技能 — 按名称/标签/场景搜索技能 |
 | `/sebastian diagnose index` | 索引健康度诊断 — 检查各技能的 frontmatter 字段完整性，输出缺失统计 |
 | `/sebastian review` | 审查学习日志 — 查看 lessons.json，按失败定级推荐需要升级的技能（联动 skill-rpg-loop） |
-| `/sebastian bench` | 路由评测基准 — 固定用例集量化匹配质量（hit@1/hit@3/分层/TF-IDF 召回率/回归告警） |
+| `/sebastian bench` | 路由评测基准 — 固定用例集量化匹配质量（hit@1/hit@3/分层/TF-IDF 召回率/回归告警）；**v3.2.0 起可用 `python3 ~/.sebastian/scan.py --bench <子命令>` 透传** |
 | `/sebastian compact lessons` | 压缩学习日志 — lessons 超阈值后按技能分桶锚定摘要归档 |
 | `/sebastian revisions` | 查看/回滚技能修订历史 — 列出修订、回滚到指定版本 |
 | `/sebastian health` | 技能健康度面板 — 聚合 ok/modified/failed/fallback 统计、回退率、失败 rung 分布 |

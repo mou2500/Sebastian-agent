@@ -1,7 +1,7 @@
 ---
 name: sebastian
-description: 工程管家 v3 — 双层匹配（TF-IDF 确定性召回 + 模型语义精排）、固定 rubric 评分、缓存、fallback 链，编排多步骤工作流、路由评测、升级治理、版本化与健康度
-version: 3.0.0
+description: 工程管家 v3 — 双层匹配（TF-IDF 确定性召回 + 模型语义精排）、固定 rubric 评分、缓存、fallback 链，编排多步骤工作流、路由评测、升级治理、版本化与健康度（v3.2.0 起支持跨工具通用技能引用 + 脚本补全）
+version: 3.2.0
 tags: [orchestration, management, meta, workflow]
 capabilities: 意图理解（Phase 0 流水线）、任务分析与拆解、**双层匹配（TF-IDF 召回 + 模型精排）与固定 rubric 评分**、**外部工具匹配与关键词触发**、多步骤工作流编排、工具索引管理与健康诊断、工作流复盘与学习日志、**轻量版本化修订快照**、**回退链显式标注**、**技能健康度面板**、**匹配缓存（5min TTL）**
 scenarios: 复杂多步骤任务、技能发现与管理、工作流规划、索引健康诊断、学习复盘、**外部工具路由与触发**、**技能修订回滚与健康度监测**、**双层匹配召回与精排**
@@ -10,6 +10,19 @@ source: internal
 ---
 
 # Sebastian — 工程管家
+
+## 跨工具适配说明（v3.2.0）
+
+本技能使用"裸技能名引用 + 脚本命令"而非斜杠语法，以便在 Claude Code、
+Codex、Ekko Studio 等任意 Agent 工具中保持一致的精确路由：
+- "调用技能 `X`" = 加载并执行 Nutstore 技能库中的 X 技能（X 为目录名，
+  三方同源，精确度不变；各工具触发方式不同：Claude 斜杠/语义、
+  Ekko 自然语言路由到 skill X、Codex 模型读 skills 目录）。
+- "运行 python3 ~/.sebastian/scan.py --<子命令>" = 直接可执行脚本，跨工具通用。
+- 标注【仅 Claude】/【仅 Codex】的步骤在对应工具不可用时，按该步骤
+  的"降级方式"处理，不中断整个工作流。
+- 斜杠语法仅作为 Claude Code 下的快捷别名保留；非 Claude 环境忽略斜杠，
+  直接按裸技能名 / 脚本命令执行。
 
 ## 概述
 
@@ -44,7 +57,9 @@ Sebastian 是一个元技能（meta-skill），负责：
 > ~/.sebastian/
 > ```
 
-### 1. `/sebastian <任务描述>` — 核心编排
+### 1. 核心编排（`/sebastian <任务描述>` 在 Claude 下的快捷别名）
+
+**跨工具表述：** 运行 `python3 ~/.sebastian/scan.py --recommend <task>`（TF-IDF 召回），再由模型按固定 rubric 精排（见下方 Phase 1-9）。
 
 **流程：**
 
@@ -113,10 +128,10 @@ Sebastian 是一个元技能（meta-skill），负责：
 - 所有步骤完成后，给出最终摘要，包括产出的文件/变更
 - **工作流完成后，自动追加一条 lessons 记录到 `~/.sebastian/lessons.json`**
 - **自建技能记录要求：**
-  - 凡是在工作流中用到的**自建技能**（包括管家自己 sebastian），每步执行完毕后立即调用 `/skill-rpg-loop` 记录使用
+  - 凡是在工作流中用到的**自建技能**（包括管家自己 sebastian），每步执行完毕后立即调用技能 `skill-rpg-loop` 记录使用
   - 自建技能列表：`sebastian`、`bifeng`、`novel-learner`、`panel-of-experts`、`shuixian`、`text2img`、`img2img`、`image-recognition`、`skill-rpg-loop`
-  - 记录时机：每步执行完成后（而不是等整个工作流结束），调用 `/skill-rpg-loop` 记录该步的 XP
-  - 如果某步自建技能执行失败，同样调用 `/skill-rpg-loop` 记录为 `failed`，以便积累经验教训驱动后续升级
+  - 记录时机：每步执行完成后（而不是等整个工作流结束），调用技能 `skill-rpg-loop` 记录该步的 XP
+  - 如果某步自建技能执行失败，同样调用技能 `skill-rpg-loop` 记录为 `failed`，以便积累经验教训驱动后续升级
 
 ### Phase 0 — 意图理解详解
 
@@ -181,7 +196,9 @@ Intent {
 
 ---
 
-### 2. `/sebastian update index` — 更新索引
+### 2. 更新索引（`/sebastian update index` 在 Claude 下的快捷别名）
+
+**跨工具表述：** 运行 `python3 ~/.sebastian/scan.py --scan`
 
 **流程：**
 
@@ -191,7 +208,9 @@ Intent {
 
 ---
 
-### 3. `/sebastian list` — 列出索引
+### 3. 列出索引（`/sebastian list` 在 Claude 下的快捷别名）
+
+**跨工具表述：** 运行 `python3 ~/.sebastian/scan.py --list`
 
 **流程：**
 
@@ -200,7 +219,9 @@ Intent {
 
 ---
 
-### 4. `/sebastian find <关键词>` — 搜索
+### 4. 搜索（`/sebastian find <关键词>` 在 Claude 下的快捷别名）
+
+**跨工具表述：** 运行 `python3 ~/.sebastian/scan.py --find <关键词>`
 
 **流程：**
 
@@ -209,18 +230,22 @@ Intent {
 
 ---
 
-### 5. `/sebastian diagnose index` — 索引健康诊断
+### 5. 索引健康诊断（`/sebastian diagnose` 在 Claude 下的快捷别名）
+
+**跨工具表述：** 运行 `python3 ~/.sebastian/scan.py --diagnose`
 
 **流程：**
 
 1. 运行 `python3 ~/.sebastian/scan.py --diagnose`
 2. 输出索引健康度报告：总计 / 完整 / 基本 / 稀疏 各多少
 3. 列出字段缺失最严重的技能
-4. 如需看技能使用/失败健康度，用 `/sebastian health`（命令 10）；如需看修订历史，用 `/sebastian revisions`（命令 9）
+4. 如需看技能使用/失败健康度，用 命令 10（`python3 ~/.sebastian/scan.py --health`）；如需看修订历史，用 命令 9（`python3 ~/.sebastian/scan.py --revisions`）
 
 ---
 
-### 6. `/sebastian review` — 审查学习日志与升级推荐
+### 6. 审查学习日志与升级推荐（`/sebastian review` 在 Claude 下的快捷别名）
+
+**跨工具表述：** 运行 `python3 ~/.sebastian/compact_lessons.py --status`
 
 **流程：**
 
@@ -229,12 +254,14 @@ Intent {
 3. 汇总统计：总执行次数、各 skill 使用次数、XP 排名
 4. **按失败定级推荐升级**（见「升级治理」章节的定级表，不再只看 XP 计数）：
    - 先查 upgrade-attempts.json 做 **novelty 去重**：同技能 + 近同目标已有尝试记录 → 不重复推荐，引用档案中的证据
-   - 按最低可表达层（rung）推荐：技能内容层失败 → `/skill-rpg-loop`（XP ≥ 5 时）；跨技能同一失败形态 → 工作流模板层；跨模板聚集 → harness 层（Sebastian 自身规则，必须人工）
+   - 按最低可表达层（rung）推荐：技能内容层失败 → 调用技能 `skill-rpg-loop`（XP ≥ 5 时）；跨技能同一失败形态 → 工作流模板层；跨模板聚集 → harness 层（Sebastian 自身规则，必须人工）
 5. 展示近期 lessons 摘要 + 归档摘要
 
 ---
 
-### 7. `/sebastian bench` — 路由评测基准
+### 7. 路由评测基准（`/sebastian bench` 在 Claude 下的快捷别名）
+
+**跨工具表述：** 运行 `python3 ~/.sebastian/bench.py validate`，再 `bench.py exam`（剥离答案）→ 模型逐题预测 → `bench.py score <predictions.json>`；亦可用 `python3 ~/.sebastian/scan.py --bench {validate,exam,score,history}` 透传。
 
 用固定用例集量化路由匹配质量，检测索引/SKILL.md 规则变更后的回归。
 
@@ -275,13 +302,15 @@ Intent {
    — 输出 hit@1 / hit@3、分层报告（single-output / composite / multi-step / nomatch）、模板命中率
    - 与 bench-history.json 对比：**相比上次基线下降 ≥ 3pt 或 10%** → 回归告警
    - **总体 < 80%** → 绝对阈值告警
-5. **处置告警**：回看 miss 用例 → 判断是索引质量问题（`/sebastian update index`）还是 SKILL.md 规则问题（修改匹配规则）→ 修复后重跑验证
+5. **处置告警**：回看 miss 用例 → 判断是索引质量问题（`python3 ~/.sebastian/scan.py --scan`）还是 SKILL.md 规则问题（修改匹配规则）→ 修复后重跑验证
 
 **触发时机：** 每次修改 SKILL.md 匹配规则 / 更新索引 / 新增外部工具后建议运行一次。工作流完成后追加 lessons 记录（与 bench 同一任务时）。
 
 ---
 
-### 8. `/sebastian compact lessons` — 压缩学习日志（锚定摘要归档）
+### 8. 压缩学习日志（`/sebastian compact lessons` 在 Claude 下的快捷别名）
+
+**跨工具表述：** 运行 `python3 ~/.sebastian/compact_lessons.py --cut --merge`
 
 lessons.json 是**扁平数组**（保留上限 50 条），超出后旧记录做锚定增量摘要，归档进 lessons-archive.json。
 
@@ -311,7 +340,9 @@ lessons.json 是**扁平数组**（保留上限 50 条），超出后旧记录�
 
 ---
 
-### 9. `/sebastian revisions` — 查看技能修订历史
+### 9. 查看技能修订历史（`/sebastian revisions` 在 Claude 下的快捷别名）
+
+**跨工具表述：** 运行 `python3 ~/.sebastian/scan.py --revisions`（历史用 `--history <skill>`，回滚用 `--revert <skill> <rev>`）
 
 轻量版本化。每次 `--scan` 时，若某 SKILL.md 内容 hash 与上次记录不同，自动把当前内容快照到 `~/.sebastian/skill-revisions/<skill-name>/<timestamp>_<hash8>.md`（每技能最多保留 20 份，超出裁剪最旧）。
 
@@ -328,7 +359,9 @@ lessons.json 是**扁平数组**（保留上限 50 条），超出后旧记录�
 
 ---
 
-### 10. `/sebastian health` — 技能健康度面板
+### 10. 技能健康度面板（`/sebastian health` 在 Claude 下的快捷别名）
+
+**跨工具表述：** 运行 `python3 ~/.sebastian/scan.py --health`
 
 从 lessons.json（flat）+ lessons-archive.json（归档摘要）聚合统计，输出技能健康面板。
 
@@ -341,28 +374,33 @@ lessons.json 是**扁平数组**（保留上限 50 条），超出后旧记录�
    - **High Failure Rate** — 失败率 ≥30% 且记录 ≥2 条的技能（附失败 rung 分布，驱动升级定级）
    - **High Modification Rate** — 修改率 ≥40% 且记录 ≥2 条的技能（升级候选）
    - **Never Used** — 在索引中但无任何 lesson 记录的技能清单
-3. 提示：面板底部指引用 `/sebastian review` 查看升级推荐（按失败定级）
+3. 提示：面板底部指引用 命令 6（`python3 ~/.sebastian/compact_lessons.py --status`，`/sebastian review` 在 Claude 下的别名）查看升级推荐（按失败定级）
 
 **数据源约定：** 面板读取 lessons 的 `result` / `workflow` / `fallback` / `rung` 字段；归档摘要读 `stats` 与 `fallback_top`。字段缺失时向后兼容（视为 0），不影响既有数据。
 
 ---
 
-### 11. `/sebastian recommend <task>` — 双层技能推荐（v3.0.0）
+### 11. 双层技能推荐（`/sebastian recommend <task>` 在 Claude 下的快捷别名，v3.0.0）
+
+**跨工具表述：** 运行 `python3 ~/.sebastian/scan.py --recommend <task description>`
 
 运行 TF-IDF 确定性召回，输出候选列表 + 模型精排 prompt。
 
 **流程：**
 
 1. 运行 `python3 ~/.sebastian/scan.py --recommend <task description>`
-2. 输出 JSON：
-   - `candidates[]`：TF-IDF top-20 候选，每个含 `name`/`type`/`description`/`score`(0-4 归一化)/`raw_tfidf`
+2. 输出 JSON（对齐 match-cache.json 的 result 结构）：
+   - `candidates[]`：TF-IDF top-N 候选，每个含 `name`/`type`/`description`/`score`(0-4 归一化)/`raw_tfidf`
    - `recommended[]`：TF-IDF 层 score ≥ 3 的候选名称列表
-   - `method`：`"tfidf"`（首次）或 `"cached"`（5min 内再次相同任务）
-   - `model_layer_prompt`：Layer 1 有候选时自动生成的 Claude 评分 prompt（0-4 rubric）
-3. **Claude 精排**（可选）：将 `model_layer_prompt` 输入 Claude，按 rubric 为每个候选打 0-4 分；score ≥ 3 纳入推荐，score = 4 为 EXACT，score = 3 为 INDIRECT
+   - `method`：`"tfidf"`
+   - `cache_hit`：`false`（首次计算）或 `true`（5min 内相同 task + index hash 命中缓存直接取结果）
+   - `fallback_reason`：`null`（正常）；若 TF-IDF 层异常则标注降级原因
+   - `timestamp`：ISO 时间戳
+   - 有候选时可附 `note`：提示"TF-IDF 层仅召回，模型精排按 0-4 rubric 执行"
+3. **Claude 精排**（可选）：将 Layer 1 候选交给 Claude，按 0-4 rubric 为每个候选打分；score ≥ 3 纳入推荐，score = 4 为 EXACT，score = 3 为 INDIRECT
 4. 无候选时：`recommended` 为空 → 走 NOMATCH 回退链（5 级）
 
-**缓存机制**：`~/.sebastian/match-cache.json`，5min TTL，128 条上限，key = SHA256(task + index_hash + rubric_version)。
+**缓存机制**：`~/.sebastian/match-cache.json`，key = SHA256(task + index_content_hash)，TTL 5min；命中则 `cache_hit=true` 直接返回缓存结果。
 
 **设计原则**：确定性层永远可用；模型层失败不中断流程；遵守冲突消解规则 4（只取核心模式，不引入数据库/外部服务）。
 
@@ -476,8 +514,8 @@ lessons.json 是**扁平数组**（保留上限 50 条），超出后旧记录�
 ├─────────────────────────────────────────────┤
 │  建议替代方案:                               │
 │  1. 用 Claude 通用能力直接完成                │
-│  2. 用 /find-skills 搜索新技能                │
-│  3. 用 /skill-creator 创建专用技能           │
+│  2. 用 find-skills 技能搜索新技能            │
+│  3. 用 skill-creator 技能创建专用技能       │
 └─────────────────────────────────────────────┘
 ```
 
@@ -540,9 +578,9 @@ Phase 0 的意图分析结果，Phase 1 的匹配不能推翻——只能细化�
 ```
 1. 重新表述用户任务描述（可能语义不清晰）
 2. 用更宽泛的关键词再次搜索索引
-3. 建议使用 `/find-skills` 搜索可安装的新技能
+3. 建议使用 `find-skills` 技能搜索可安装的新技能
 4. 建议直接用 Claude 的通用能力完成
-5. 如果涉及原创技能需求，建议使用 `/skill-creator` 创建新技能
+5. 如果涉及原创技能需求，建议使用 `skill-creator` 技能创建新技能
 ```
 
 ---
@@ -589,7 +627,7 @@ Phase 0 的意图分析结果，Phase 1 的匹配不能推翻——只能细化�
 ```
 
 **关键规则：**
-- 外部工具不是通过 `/skillname` 调用的，而是通过**在指定目录下运行命令**
+- 外部工具不是通过斜杠调用（`/skillname` 此处为占位符，指"某个技能名"），而是通过**在指定目录下运行命令**
 - 工作流步骤的"执行"字段告诉用户/Claude 具体的命令
 - 对于有多个子命令的工具（如 career-ops），步骤描述中明确指定哪个子命令
 - 外部工具步骤执行时使用 Bash 运行命令，等待结果输出
@@ -598,12 +636,14 @@ Phase 0 的意图分析结果，Phase 1 的匹配不能推翻——只能细化�
 
 除了外部工具，索引中还包含 **Plugin (plugin)** 类型。Plugin 是 Claude Code 插件市场安装的插件，其技能通过 `/` 斜杠命令调用。
 
+> **【仅 Claude 插件】** 本节涉及的 webnovel-writer 等插件安装在 `~/.claude/webnovel-writer/`，不随 Nutstore 库同步，未安装到 Codex/Ekko。降级方式：该插件未安装到 Codex/Ekko；如需网文功能，先在对应工具装插件或改用通用能力写章节；本步骤标注为不可用时跳过，不中断整个工作流。
+
 #### Plugin 与 外部工具的区别
 
 | 维度 | 外部工具 (external_tool) | Plugin (plugin) |
 |------|--------------------------|-----------------|
 | 安装方式 | `git clone` + 手动部署 | `claude plugin install` |
-| 调用方式 | `cd <路径> && <命令>` | `/webnovel-*` 斜杠命令 |
+| 调用方式 | `cd <路径> && <命令>` | `/webnovel-*` 斜杠命令【仅 Claude 插件】 |
 | 技能注册 | 无，需 Sebastian 路由 | 自动注册到 Claude Code |
 | 维护方式 | 手动更新 | `claude plugin update` |
 | 索引来源 | `external-tools/*.json` 描述文件 | `external-tools/*.json` 描述文件 + 插件缓存自动发现 |
@@ -617,7 +657,7 @@ Plugin 使用与外部工具相同的匹配策略，额外支持：
 | `name` | 高 | 插件名称匹配 |
 | `keywords` | **极高** | 触发关键词（精确命中时直接 EXACT） |
 | `subcommands` | 高 | 子命令名称匹配（如 "写章节" → webnovel-write） |
-| `invoke_prefix` | 辅助 | 斜杠命令前缀（如 `/webnovel-`） |
+| `invoke_prefix` | 辅助 | 斜杠命令前缀（如 `/webnovel-`，仅 Claude 插件） |
 
 #### Plugin 关键词触发规则
 
@@ -631,17 +671,18 @@ Plugin 使用与外部工具相同的匹配策略，额外支持：
 当匹配到 plugin 时，工作流步骤的"技术路径"标注为 `plugin`，步骤描述中包含：
 
 ```
-步骤 N: /webnovel-<subcommand>
+步骤 N: /webnovel-<subcommand>   【仅 Claude 插件】
          — <做什么>
          技术路径: plugin
          执行: 直接调用 /webnovel-<subcommand>
 ```
 
 **关键规则：**
-- Plugin 技能通过 `/webnovel-*` 斜杠命令调用，不需要运行脚本
+- Plugin 技能通过 `/webnovel-*` 斜杠命令调用【仅 Claude 插件】，不需要运行脚本
 - Plugin 技能是 Claude Code 原生支持的，命令自动注册
 - 由于 plugin 技能占用 token 预算，只在需要时调用对应的子命令
 - 调用前检查插件是否已启用（`claude plugin list`），如果未启用则提示用户先启用
+- **降级**：Codex/Ekko 未安装该插件时，本步骤标注为不可用并跳过，或改用通用能力写章节
 
 ### 外部工具模版：求职工作流 (career-ops)
 
@@ -676,7 +717,7 @@ Plugin 使用与外部工具相同的匹配策略，额外支持：
 
 ---
 
-## 工作流模板（12 种）
+## 工作流模板（13 种）
 
 ### 步骤成功判定约定（Success Predicate）
 
@@ -696,8 +737,8 @@ Plugin 使用与外部工具相同的匹配策略，额外支持：
 适用于"系统出 bug 了 / 哪里报错了 / 性能回退了"
 
 ```
-步骤 1: /systematic-debugging — 结构化调试循环
-步骤 2: /test-driven-development (可选) — 修复 + 回归测试
+步骤 1: 调用技能 `systematic-debugging` — 结构化调试循环
+步骤 2: 调用技能 `test-driven-development` (可选) — 修复 + 回归测试
 步骤 3: (可选) — 如果 bug 暴露了领域模型模糊，把结论更新进 CONTEXT.md
 ```
 
@@ -706,10 +747,10 @@ Plugin 使用与外部工具相同的匹配策略，额外支持：
 适用于"我们要做一个新功能 / 我有个想法"
 
 ```
-步骤 1: /panel-of-experts (可选) — 需求不明确时多角色讨论
-步骤 2: /to-prd — 转化为 PRD 文档
-步骤 3: /to-issues — 拆解为垂直切片
-步骤 4: /triage — 打标签分类形成 backlog
+步骤 1: 调用技能 `panel-of-experts` (可选) — 需求不明确时多角色讨论
+步骤 2: 调用技能 `to-prd` — 转化为 PRD 文档
+步骤 3: 调用技能 `to-issues` — 拆解为垂直切片
+步骤 4: 调用技能 `triage` — 打标签分类形成 backlog
 ```
 
 注：to-prd / to-issues / triage 未入索引时，对应步骤降级为 Claude 通用能力（产出 PRD 文档 / 垂直切片 / 标签清单），不要因技能缺失而中断流程。
@@ -719,9 +760,9 @@ Plugin 使用与外部工具相同的匹配策略，额外支持：
 适用于"代码需要重构 / 架构需要优化"
 
 ```
-步骤 1: /grill-with-docs — 领域模型质询
+步骤 1: 调用技能 `grill-with-docs` — 领域模型质询
 步骤 2: 精炼领域模型 — 把结论落进 CONTEXT.md（无专用技能时走 Claude 通用能力）
-步骤 3: /redesign-existing-projects (可选) — UI/前端视觉审计
+步骤 3: 调用技能 `redesign-existing-projects` (可选) — UI/前端视觉审计
 ```
 
 ### 模板 D：跨 Session 交接
@@ -729,8 +770,8 @@ Plugin 使用与外部工具相同的匹配策略，额外支持：
 适用于"先做一部分，下次继续 / 换 agent 接手"
 
 ```
-步骤 1: /to-prd — 将已完成+剩余计划落地文档
-步骤 2: /handoff — 生成交接文档
+步骤 1: 调用技能 `to-prd` — 将已完成+剩余计划落地文档
+步骤 2: 调用技能 `handoff` — 生成交接文档
 ```
 
 注：handoff / to-prd 未入索引时，直接产出交接文档 markdown（已完成 + 剩余计划 + 关键上下文），不中断流程。
@@ -740,15 +781,15 @@ Plugin 使用与外部工具相同的匹配策略，额外支持：
 适用于"需要设计/图片/品牌物料"
 
 ```
-步骤 1: /shuixian (可选) — 美术总监审查方向
+步骤 1: 调用技能 `shuixian` (可选) — 美术总监审查方向
 步骤 2: 根据产出类型选择:
-  - 品牌套件 → /brandkit
-  - 网页设计 → /design-taste-frontend
-  - 社交卡片 → /guizang-social-card-skill
-  - 网页 PPT → /guizang-ppt-skill
-  - 文生图 → /text2img
-  - 图生图 → /img2img
-步骤 3: /stitch-design-taste (可选) — 生成设计规范文档
+  - 品牌套件 → 调用技能 `brandkit`
+  - 网页设计 → 调用技能 `design-taste-frontend`
+  - 社交卡片 → 调用技能 `guizang-social-card-skill`
+  - 网页 PPT → 调用技能 `guizang-ppt-skill`
+  - 文生图 → 调用技能 `text2img`
+  - 图生图 → 调用技能 `img2img`
+步骤 3: 调用技能 `stitch-design-taste` (可选) — 生成设计规范文档
 ```
 
 ### 模板 F：文档/数据处理流程
@@ -757,10 +798,10 @@ Plugin 使用与外部工具相同的匹配策略，额外支持：
 
 ```
 步骤 1: 根据产出类型选择:
-  - Word 文档 → /docx
-  - 电子表格 → /xlsx
-  - 演示文稿 → /pptx
-步骤 2: (可选) — 长任务需要存档（/handoff 或 Claude 交接文档，见模板 D 注）
+  - Word 文档 → 调用技能 `docx`
+  - 电子表格 → 调用技能 `xlsx`
+  - 演示文稿 → 调用技能 `pptx`
+步骤 2: (可选) — 长任务需要存档（调用 `handoff` 技能或 Claude 交接文档，见模板 D 注）
 ```
 
 ### 模板 G：内容→格式两步流水线（新增）
@@ -777,8 +818,8 @@ Plugin 使用与外部工具相同的匹配策略，额外支持：
 示例：对公营销文案→输出 .docx 文件
 
 ```
-Intent.coreType = copywriting → /bifeng（写文案）
-Intent.deliveryFormat = docx  → /docx（输出 .docx）
+Intent.coreType = copywriting → 调用技能 `bifeng`（写文案）
+Intent.deliveryFormat = docx  → 调用技能 `docx`（输出 .docx）
 ```
 
 ### 模板 H：求职工作流（外部工具 — career-ops）
@@ -806,15 +847,16 @@ Intent.deliveryFormat = docx  → /docx（输出 .docx）
 触发条件：用户输入匹配 webnovel-writer 的 keywords（写小说、网文、创作、写作、章节、大纲、故事设定等）
 
 ```
-步骤 1: 根据用户意图选择 webnovel-writer 子命令:
-  - 初始化小说项目 → /webnovel-init (分阶段引导创建故事骨架)
-  - 规划章节 → /webnovel-plan (分解卷/章节，填充时间线)
-  - 写作章节 → /webnovel-write (上下文→草稿→审查→润色→提交)
-  - 审查章节 → /webnovel-review (多维度评审：节奏、一致性、OOC等)
-  - 查询故事设定 → /webnovel-query (角色、伏笔、实体关系)
-  - 学习写作模式 → /webnovel-learn (记录有效技巧到长期记忆)
-  - 健康检查 → /webnovel-doctor (检查目录、DB、RAG、依赖)
-  - 可视化面板 → /webnovel-dashboard (项目状态、实体图谱)
+步骤 1: 根据用户意图选择 webnovel-writer 子命令（【仅 Claude 插件】，在 ~/.claude/webnovel-writer/）:
+  - 初始化小说项目 → 调用技能 `webnovel-writer:webnovel-init` (分阶段引导创建故事骨架)
+  - 规划章节 → 调用技能 `webnovel-writer:webnovel-plan` (分解卷/章节，填充时间线)
+  - 写作章节 → 调用技能 `webnovel-writer:webnovel-write` (上下文→草稿→审查→润色→提交)
+  - 审查章节 → 调用技能 `webnovel-writer:webnovel-review` (多维度评审：节奏、一致性、OOC等)
+  - 查询故事设定 → 调用技能 `webnovel-writer:webnovel-query` (角色、伏笔、实体关系)
+  - 学习写作模式 → 调用技能 `webnovel-writer:webnovel-learn` (记录有效技巧到长期记忆)
+  - 健康检查 → 调用技能 `webnovel-writer:webnovel-doctor` (检查目录、DB、RAG、依赖)
+  - 可视化面板 → 调用技能 `webnovel-writer:webnovel-dashboard` (项目状态、实体图谱)
+  降级方式【Codex/Ekko】：该插件未安装到 Codex/Ekko；如需网文功能，先在对应工具装插件或改用通用能力写章节；本步骤标注为不可用时跳过，不中断整个工作流
 步骤 2: 展示结果给用户，询问下一步操作
 步骤 3: (可选) 如果涉及多个步骤 → 按依赖关系编排
 ```
@@ -836,7 +878,7 @@ Intent.deliveryFormat = docx  → /docx（输出 .docx）
 步骤 1: <内容产出技能> (可选)
          — 内容尚未产出时先用 bifeng / ecommerce-visual-copywriting 定稿
          — 内容已存在则跳过本步
-步骤 2: /jev-judge — 按需选择问题组下判断:
+步骤 2: 调用技能 `jev-judge` — 按需选择问题组下判断:
   - 质量打分 → --preset quality
   - 合规把关 → --preset compliance
   - 语气判定 → --preset tone
@@ -861,17 +903,20 @@ Intent.deliveryFormat = docx  → /docx（输出 .docx）
 触发条件：用户要求检查 Sebastian 自身的索引、bench、lessons、修订历史，或修改了 SKILL.md 匹配规则 / 更新索引 / 新增外部工具后需要验证。
 
 ```
-步骤 1: /sebastian update index — 刷新索引（自动存修订快照）
+步骤 1: 运行 scan.py --scan — 刷新索引（自动存修订快照）
+        （Claude 快捷别名 /sebastian update index）
         成功判定: index.json 更新且输出含总数/新增/更新统计
-步骤 2: /sebastian diagnose index — 索引字段健康度
+步骤 2: 运行 scan.py --diagnose index — 索引字段健康度
         成功判定: 报告列出完整/基本/稀疏三档数量，稀疏清单非空时记录待补技能
-步骤 3: /sebastian bench — 路由回归验证（仅当步骤 1/2 涉及匹配规则或索引结构变更时）
+步骤 3: 运行 bench.py — 路由回归验证（validate → exam → 模型预测 → score）
+        （Claude 快捷别名 /sebastian bench；仅当步骤 1/2 涉及匹配规则或索引结构变更时）
         成功判定: 无回归告警（总体 ≥80% 且未较上次基线下降 ≥3pt）
-步骤 4: /sebastian review — 升级推荐（按失败定级 + novelty 去重）
+步骤 4: 运行 compact_lessons.py --status — 升级推荐（按失败定级 + novelty 去重）
+        （Claude 快捷别名 /sebastian review）
         成功判定: 输出推荐清单；XP≥5 且 novelty 通过的技能逐条列出
-步骤 5: /sebastian health — 健康面板确认
+步骤 5: 运行 scan.py --health — 健康面板确认
         成功判定: 无高失败率/高修改率技能；回退率与未使用技能清单已审阅
-步骤 6: (条件) 若 lessons 超 50 条 → /sebastian compact lessons
+步骤 6: (条件) 若 lessons 超 50 条 → 运行 compact_lessons.py --cut --merge
 ```
 
 **约定：**
@@ -889,22 +934,56 @@ Intent.deliveryFormat = docx  → /docx（输出 .docx）
 
 ```
 步骤 1: 根据研究类型选择入口技能:
-  - 覆盖报告/行业概览 → /equity-research 或 /sector-overview 或 /initiating-coverage
-  - 财报解读 → /earnings-analysis 或 /earnings-preview
-  - 财务建模 → /3-statements（三表）→ /dcf-model（估值）
-  - PE/并购 → /lbo-model 或 /merger-model 或 /returns-analysis
-  - 固收 → /fixed-income-portfolio 或 /bond-relative-value / /bond-futures-basis
-步骤 2: (可选) /check-model — 建模后交叉验证数字
+  - 覆盖报告/行业概览 → 调用技能 `equity-research` 或 `sector-overview` 或 `initiating-coverage`
+  - 财报解读 → 调用技能 `earnings-analysis` 或 `earnings-preview`
+  - 财务建模 → 调用技能 `3-statements`（三表）→ 调用技能 `dcf-model`（估值）
+  - PE/并购 → 调用技能 `lbo-model` 或 `merger-model` 或 `returns-analysis`
+  - 固收 → 调用技能 `fixed-income-portfolio` 或 `bond-relative-value` / `bond-futures-basis`
+步骤 2: (可选) 调用技能 `check-model` — 建模后交叉验证数字
         成功判定: 关键假设与输出可追溯，交叉核对无异常
-步骤 3: (可选) 交付包装 → /docx (报告) / /pptx (路演页) / /xlsx (模型)
-        或 /fsi-strip-profile (单页速览) / /tear-sheet / /pitch-deck
+步骤 3: (可选) 交付包装 → 调用技能 `docx` (报告) / `pptx` (路演页) / `xlsx` (模型)
+        或 调用技能 `fsi-strip-profile` (单页速览) / `tear-sheet` / `pitch-deck`
 ```
 
 **约定：**
 - 技能池按"分析对象"垂直分离：银行/固收类（fsi-*, bond-*）与股权类（dcf, lbo, dcf-model, equity-research）通常不混用，同一流水线内保持同一对象域
-- 建模类（3-statements/dcf/lbo）先建后验：建模步骤完成必接 /check-model，不直接进交付
+- 建模类（3-statements/dcf/lbo）先建后验：建模步骤完成必接调用技能 `check-model`，不直接进交付
 - 交付格式按 deliveryFormat 维度选择（模板 G 逻辑），金融场景默认 docx/pptx/xlsx
 - 路由优先级：明确的"三表建模"→ 3-statements；"估值"→ dcf-model；"个股报告"→ equity-research；模糊的"研究 X"→ sector-overview + panel-of-experts（多角色定方向）
+
+---
+
+### 模板 N：法律工作流（Legal Skills 路由）
+
+适用于"合同审查 / 判决书解读 / 综合案件研判 / 法律论证撰写"
+
+触发条件：任务涉及法律事务（合同、判决、案件、起诉状、证据、庭审、答辩、法律意见书等），Intent.coreType = legal。
+
+四个法律技能的边界路由（避免误配）：
+
+| 用户意图 | 路由到 | 说明 |
+|---------|--------|------|
+| 单独解读一份判决书 / 拆裁判理由 / 提炼疑点 | 调用技能 `judgment-analysis` | 单文书场景 |
+| 起草 / 审查 / 修改合同，输出风险清单与意见书 | 调用技能 `contract-copilot` | 合同专项 |
+| 多材料综合研判（起诉状、证据、庭审笔录、检索材料）/ 诉讼策略 / 上诉再审 | 调用技能 `legal-case-analysis` | 综合场景，含庭审复盘 |
+| 撰写法律意见书、代理词、答辩状中的论证部分 / 反驳对方观点 | 调用技能 `argument-chain-construction` | 论证组织 |
+
+```
+步骤 1: 按路由表选定入口技能:
+  - 单一判决书 → 调用技能 `judgment-analysis`
+  - 合同审查/起草 → 调用技能 `contract-copilot`
+  - 多材料综合研判 → 调用技能 `legal-case-analysis`
+  - 纯论证撰写（论证链构建） → 调用技能 `argument-chain-construction`
+步骤 2: (可选) 综合案件场景下 调用技能 `legal-case-analysis` 内部会调用 技能 `judgment-analysis` 解读已收判决
+步骤 3: (可选) 论证部分需要严谨逻辑结构时补接 调用技能 `argument-chain-construction`
+步骤 4: (可选) 交付包装 → 调用技能 `docx` (意见书/审查报告) / 调用技能 `pdf` (导出)
+```
+
+**约定：**
+- 路由优先级：合同专项 > 综合研判 > 单文书；"看判决+给意见"走综合研判，"只看判决"走单文书
+- 法律检索不在本库范围（依赖收费平台）；遇到检索需求告知用户走外部平台
+- 四个技能输出均附"仅供参考，非正式法律意见"免责声明
+- 涉及财务/资产纠纷（如丰滢案）时与模板 M 金融研究可组合使用，法务判断走 N，财务测算走 M
 
 ---
 
@@ -916,7 +995,7 @@ Intent.deliveryFormat = docx  → /docx（输出 .docx）
 |------|--------|
 | 用户说"我想做 X"（X 是一个技能名或非常具体的操作） | 直接调用 skill，无需 Sebastian |
 | 用户说"帮我做 X，需要 Y 和 Z 配合" | **Sebastian** |
-| 用户说"我不知道该用什么来做 X" | `/find-skills` |
+| 用户说"我不知道该用什么来做 X" | 调用技能 `find-skills` |
 | 用户说"我有一个包含多步骤的复杂任务" | **Sebastian** |
 | 用户只说了模糊的需求，需要先判断属于哪个领域 | **Sebastian（Phase 0 意图理解）** |
 
@@ -924,7 +1003,7 @@ Intent.deliveryFormat = docx  → /docx（输出 .docx）
 
 1. **单步骤 → 不经过 Sebastian**：如果任务明确对应一个技能的直接能力，直接调用
 2. **多步骤 → 经过 Sebastian**：需要 2 个以上技能协作，或步骤有前后依赖关系
-3. **订阅/定时 → 经过 loop 技能**：定期执行的任务用 `/loop`
+3. **订阅/定时 → 经过 loop 技能**：定期执行的任务用「循环/定时执行」【仅 Claude 内置命令 `/loop`；Codex/Ekko 无等价命令，改用各工具原生定时调度器】
 4. **纯咨询 → 经过 panel-of-experts**：需要多角色讨论的战略决策
 
 ---
@@ -933,24 +1012,50 @@ Intent.deliveryFormat = docx  → /docx（输出 .docx）
 
 ### 与 `systematic-debugging` 的集成
 
-识别现象关键词（"报错"、"失败"、"异常"、"崩溃"、"性能回退"），优先编排 `/systematic-debugging` 作为第一步（模板 A）。
+识别现象关键词（"报错"、"失败"、"异常"、"崩溃"、"性能回退"），优先编排调用技能 `systematic-debugging` 作为第一步（模板 A）。
+
+### 与 `diagnosing-superpowers` 的集成（v7.0.0 新增，obra/superpowers）
+
+当用户报告 **superpowers 体系本身**行为异常时路由到调用技能 `diagnosing-superpowers`，而非 `systematic-debugging`：
+
+| 关键词 / 现象 | 路由 |
+|------------|------|
+| "superpowers 会话跑歪了"、"skill 没触发"、"为什么这么贵/慢了" | 调用技能 `diagnosing-superpowers` |
+| "为什么这个 plan 没被执行"、"重复工作了" | 调用技能 `diagnosing-superpowers` |
+| "给维护者提 bug 报告"（针对 superpowers 本身） | 调用技能 `diagnosing-superpowers` |
+| "我代码里有个 bug"（用户代码，非 superpowers） | 调用技能 `systematic-debugging`（模板 A） |
+
+**边界原则：** `diagnosing-superpowers` 只报告，不修复；修复 superpowers 是维护者的事。
+
+### 与四个法律技能的集成（v1.0.0 新增）
+
+四个法律技能（judgment-analysis / contract-copilot / legal-case-analysis / argument-chain-construction）之间通过模板 N 路由表消歧：
+
+| 关键词 | 路由 |
+|--------|------|
+| "这份判决怎么看"、"拆一下裁判理由" | 调用技能 `judgment-analysis` |
+| "审下这份合同"、"起草 XX 协议" | 调用技能 `contract-copilot` |
+| "起诉 XX"、"证据怎么组织"、"上诉/再审策略" | 调用技能 `legal-case-analysis` |
+| "写个代理词"、"论证 XX 主张"、"反驳对方" | 调用技能 `argument-chain-construction` |
+
+组合规则：综合案件场景下，`legal-case-analysis` 调用 `judgment-analysis` 解读已收判决；论证部分复杂时补接 `argument-chain-construction`。与金融研究（模板 M）交叉的案件（股权纠纷、资产追索等），法务判断走 N，财务测算走 M。
 
 ### 与 `find-skills` 的集成
 
-当匹配结果为 NOMATCH 时，自动建议使用 `/find-skills` 搜索可安装的外部技能。
+当匹配结果为 NOMATCH 时，自动建议使用 调用技能 `find-skills` 搜索可安装的外部技能。
 
 ### 与 `skill-rpg-loop` 的集成
 
 **双向集成，不只是升级推荐：**
 
-1. **即时记录（正向）** — 工作流每步执行自建技能后，立即调用 `/skill-rpg-loop` 记录该步使用，让 rpg-loop 实时积累 XP
-2. **升级推荐（反向）** — `/sebastian review` 识别 XP ≥ 5 的技能后，推荐用户执行 `/skill-rpg-loop` 升级对应技能
+1. **即时记录（正向）** — 工作流每步执行自建技能后，立即调用技能 `skill-rpg-loop` 记录该步使用，让 rpg-loop 实时积累 XP
+2. **升级推荐（反向）** — 运行 compact_lessons.py --status 识别 XP ≥ 5 的技能后（Claude 快捷别名 /sebastian review），推荐用户调用技能 `skill-rpg-loop` 升级对应技能
 
 具体规则见上方「Lessons 与 rpg-loop 记录」章节。
 
 ### 与 `darwin-skill` 的集成
 
-当 lessons 中某技能连续 modified/failed 超过 3 次（且 novelty 门通过，见「升级治理」），推荐使用 `/darwin-skill` 做结构性优化。**产出契约：** darwin 的升级产物必须是 itemized delta（变更点清单 + 理由 + 回归风险），逐条经人工批准后落地；禁止整体重写技能全文。被拒的升级方案连同证据写入 upgrade-attempts.json。
+当 lessons 中某技能连续 modified/failed 超过 3 次（且 novelty 门通过，见「升级治理」），推荐使用 调用技能 `darwin-skill` 做结构性优化。**产出契约：** darwin 的升级产物必须是 itemized delta（变更点清单 + 理由 + 回归风险），逐条经人工批准后落地；禁止整体重写技能全文。被拒的升级方案连同证据写入 upgrade-attempts.json。
 
 ### 与 `handoff` 的集成
 
@@ -958,7 +1063,7 @@ Intent.deliveryFormat = docx  → /docx（输出 .docx）
 
 ### Skill coreType 映射表
 
-Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 `/sebastian update index` 后自动加载：
+Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 `python3 ~/.sebastian/scan.py --scan`（刷新索引）后自动加载：
 
 | Skill | coreType | deliveryFormats |
 |-------|----------|----------------|
@@ -977,6 +1082,10 @@ Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 
 | kami | `typesetting` | html |
 | sebastian | `meta` | none |
 | jev-judge | `judgment` | none（判断结果，无文件产出） |
+| judgment-analysis | `legal-analysis` | none（分析文本，无文件产出） |
+| contract-copilot | `legal-analysis` | none（审查意见/风险清单） |
+| legal-case-analysis | `legal-analysis` | none（研判报告） |
+| argument-chain-construction | `legal-analysis` | none（论证结构） |
 | **career-ops** 🡒 外部工具 | `job-search` | pdf / md / none（取决于子命令） |
 | **webnovel-writer** 🡒 Plugin | `creative-writing` | md / json / none（取决于子命令） |
 
@@ -991,11 +1100,11 @@ Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 
 每次工作流执行时，Sebastian 需要做两件事：
 
 1. **Lessons 记录（内部复盘用）** → 写入 `~/.sebastian/lessons.json`
-2. **rpg-loop 记录（XP 经验值用）** → 调用 `/skill-rpg-loop` 记录每步使用
+2. **rpg-loop 记录（XP 经验值用）** → 调用技能 `skill-rpg-loop` 记录每步使用
 
 两者分工：Lessons 记录整个工作流的复盘信息，rpg-loop 记录每个自建技能的 XP 用于升级。
 
-**成长治理：** lessons.json 是扁平数组，保留上限 50 条。记录超过 40 条后 `--status` 给出警告，超过 50 条后执行 `/sebastian compact lessons`——旧记录按主技能分桶、锚定增量摘要后归档到 `lessons-archive.json`（详见命令 8）。归档摘要与 flat 记录同样参与 `/sebastian review` 的统计与复盘。
+**成长治理：** lessons.json 是扁平数组，保留上限 50 条。记录超过 40 条后 `compact_lessons.py --status` 给出警告，超过 50 条后执行 `compact_lessons.py --cut --merge`（Claude 快捷别名 /sebastian compact lessons）——旧记录按主技能分桶、锚定增量摘要后归档到 `lessons-archive.json`（详见命令 8）。归档摘要与 flat 记录同样参与 `compact_lessons.py --status`（/sebastian review）的统计与复盘。
 
 ### Lessons 记录格式
 
@@ -1026,11 +1135,11 @@ Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 
 - `result=modified` → usage_count +3
 - `result=failed` → usage_count +5
 - **升级推荐规则**（v2.7.0 起替代单纯 XP 计数）：XP ≥ 5 **且**通过 novelty 去重 → 按 `rung` 推荐（详见「升级治理」章节）。教训按三元签名填写，禁止只按表面错误归因
-- **回退显式化（v2.9.0）**：当工作流某步实际走了「不匹配时的回退链」（如 NOMATCH→通用能力、技能缺失→降级为通用能力）时，在该 lessons 记录填 `fallback` 字段，写明 `chain`（走的回退路径）与 `reason`（为什么回退）。这让用户能区分"精确匹配完成"与"凑活出来的"，`/sebastian health` 面板据此统计回退率。脚本向后兼容 `fallback_reason` / `fallback_chain` 旧字段名。
+- **回退显式化（v2.9.0）**：当工作流某步实际走了「不匹配时的回退链」（如 NOMATCH→通用能力、技能缺失→降级为通用能力）时，在该 lessons 记录填 `fallback` 字段，写明 `chain`（走的回退路径）与 `reason`（为什么回退）。这让用户能区分"精确匹配完成"与"凑活出来的"，`python3 ~/.sebastian/scan.py --health`（Claude 快捷别名 /sebastian health）面板据此统计回退率。脚本向后兼容 `fallback_reason` / `fallback_chain` 旧字段名。
 
 ### rpg-loop 记录调用时机
 
-每步自建技能执行完成后，主动调用 `/skill-rpg-loop` 记录该步的使用结果。具体：
+每步自建技能执行完成后，主动调用技能 `skill-rpg-loop` 记录该步的使用结果。具体：
 
 | 步骤结果 | rpg-loop 调用方式 |
 |---------|-----------------|
@@ -1040,9 +1149,9 @@ Phase 0 加权匹配和 Scope Guard 依赖以下 coreType 映射关系。执行 
 
 调用示例：
 ```
-/skill-rpg-loop 记录 sebastian 使用: 编排工作流，结果=ok
-/skill-rpg-loop 记录 bifeng 使用: 撰写营销文案，结果=modified
-/skill-rpg-loop 记录 text2img 使用: 生成产品配图，结果=ok
+调用技能 skill-rpg-loop 记录 sebastian 使用: 编排工作流，结果=ok
+调用技能 skill-rpg-loop 记录 bifeng 使用: 撰写营销文案，结果=modified
+调用技能 skill-rpg-loop 记录 text2img 使用: 生成产品配图，结果=ok
 ```
 
 每步独立记录，不应等到整个工作流结束才统一调用。
@@ -1124,11 +1233,11 @@ v2.7.0 起，Sebastian 的技能/规则升级不再由使用计数单独驱动�
 │  匹配模式: 视觉产出流程                      │
 │  匹配技能: 3 个                             │
 ├─────────────────────────────────────────────┤
-│  步骤 1: /guizang-ppt-skill                 │
+│  步骤 1: 调用技能 guizang-ppt-skill         │
 │          — 生成发布会风格的网页 PPT/展示页   │
-│  步骤 2: /guizang-social-card-skill         │
+│  步骤 2: 调用技能 guizang-social-card-skill  │
 │          — 生成社交媒体分享卡片              │
-│  步骤 3: /brandkit                          │
+│  步骤 3: 调用技能 brandkit                  │
 │          — 补充品牌套件保持视觉一致性        │
 └─────────────────────────────────────────────┘
 ```
@@ -1144,9 +1253,9 @@ v2.7.0 起，Sebastian 的技能/规则升级不再由使用计数单独驱动�
 │  匹配技能: 2 个                             │
 │  步骤依赖: 步骤 2 依赖步骤 1                │
 ├─────────────────────────────────────────────┤
-│  步骤 1: /systematic-debugging             │
+│  步骤 1: 调用技能 systematic-debugging      │
 │          — 结构化调试                        │
-│  步骤 2: /test-driven-development          │
+│  步骤 2: 调用技能 test-driven-development   │
 │          — TDD 增加回归测试                  │
 └─────────────────────────────────────────────┘
 ```
@@ -1163,9 +1272,9 @@ v2.7.0 起，Sebastian 的技能/规则升级不再由使用计数单独驱动�
 │  匹配技能: 2 个                             │
 │  步骤依赖: 步骤 2 依赖步骤 1                │
 ├─────────────────────────────────────────────┤
-│  步骤 1: /bifeng                            │
+│  步骤 1: 调用技能 bifeng                    │
 │          — 对公营销文案改写（content layer）  │
-│  步骤 2: /docx                              │
+│  步骤 2: 调用技能 docx                      │
 │          — 包装为 .docx 格式（presentation）  │
 └─────────────────────────────────────────────┘
 ```
@@ -1174,6 +1283,7 @@ v2.7.0 起，Sebastian 的技能/规则升级不再由使用计数单独驱动�
 
 - 作者：何牟
 - 来源：内部自建
-- 版本：3.0.0
-- 最后更新：2026-09-22
-- v3.1.0 巡检修复：补落地模板 L/M 正文；find-skill→find-skills；方案盒 v2→v3；关键词触发去百分数
+- 版本：3.2.0
+- 最后更新：2026-10-14
+- v3.2.0 巡检修复：补落地模板 L/M 正文；find-skill→find-skills；方案盒 v2→v3；关键词触发去百分数
+- v3.2.0：表述层跨工具通用化（斜杠技能引用→调用技能 `X`；自维护命令→scan.py/bench.py/compact_lessons.py 脚本表述；工具专用命令标注【仅 Claude 内置/插件】+ 降级方式）+ scan.py 补全 --recommend / --bench 子命令

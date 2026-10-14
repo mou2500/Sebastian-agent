@@ -1,5 +1,33 @@
 # Changelog
 
+## 3.2.0 (2026-10-14)
+
+跨工具通用化 + 脚本补全 + 文档全量同步
+
+- **SKILL.md 表述层跨工具通用化**（v3.1.0 草案在 Nutstore 落盘后正式进仓库）
+  - 技能引用统一改为 `调用技能 X`（裸名），移除斜杠 `/X` 语法
+  - 自维护命令统一为 `python3 ~/.sebastian/scan.py <子命令>` 脚本形式
+  - 工具专用命令（`/loop`、`/webnovel-*`）标注【仅 Claude 内置/插件】并附降级方式
+  - 新增"跨工具适配说明"章节，覆盖 Claude Code / Codex / Ekko 三平台的可用性与降级路径
+
+- **scan.py 补全 `--bench` 透传子命令**
+  - `python3 ~/.sebastian/scan.py --bench {validate|exam|score|history}` 透传给 `bench.py`
+  - 让单入口工具的调用方无需记忆两个脚本路径，统一走 scan.py 入口
+  - 与 v3.0.0 `--recommend` 合，形成双层匹配在 Codex/Ekko 下可运行的完整路径
+
+- **13 个落地模板（A-N）全量进仓库**
+  - Nutstore SKILL.md 的 Template N 法律工作流首次进仓库
+  - 集成指南补 diagnosing-superpowers + 4 个法律技能路由
+  - 修复 Template J 历史遗留（v2.8.0 遗留项①）
+
+- **README / CONTEXT / CHANGELOG 同步 v3.2.0**
+  - README 版本号 3.0.0 → 3.2.0；补跨工具等价脚本调用块；命令表补 `--bench`
+  - CONTEXT.md bench 行补 `scan.py --bench <子命令>` 透传说明
+
+> 注：Nutstore 草案曾用 `3.1.0` 版本号，因仓库 CHANGELOG 已被巡检修复增量占用 3.1.0，本次正式发版升为 3.2.0。
+
+---
+
 ## 3.1.0 (2026-09-22)
 
 巡检修复 + 模板扩充（基于 `/sebastian` 索引健康诊断 + 工作流模板评估）

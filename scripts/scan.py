@@ -19,6 +19,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
@@ -859,6 +860,28 @@ def cmd_list(index_path=None):
 
 
 # ---------------------------------------------------------------------------
+#  CLI: --bench (v3.2.0 bench.py passthrough)
+# ---------------------------------------------------------------------------
+
+
+def cmd_bench_entry(extra_args):
+    """Forward to bench.py for validate / exam / score / history.
+    Keeps the `scan.py --bench` cross-tool expression in SKILL.md functional
+    even when bench.py is invoked as a side-script by tools that only know
+    the single entry-point pattern (e.g. Codex, Ekko).
+    """
+    bench_path = os.path.join(_sebastian_dir(), "bench.py")
+    if not os.path.exists(bench_path):
+        bench_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bench.py")
+    if not os.path.exists(bench_path):
+        print(f"ERROR: bench.py not found. Expected at {bench_path}", file=sys.stderr)
+        sys.exit(1)
+    argv = [sys.executable, bench_path] + extra_args
+    result = subprocess.run(argv)
+    sys.exit(result.returncode)
+
+
+# ---------------------------------------------------------------------------
 #  CLI: --recommend (v3.0.0 two-layer matching)
 # ---------------------------------------------------------------------------
 
@@ -1326,6 +1349,8 @@ def main():
                 print(f"{i:>3}  {r['timestamp']:<18}  {r['hash']:<10}  {size_str:>8}  {r['filename']}")
             print()
             print("To revert: python3 scan.py --revert <skill-name> <filename>")
+    elif command == "--bench":
+        cmd_bench_entry(sys.argv[2:] if len(sys.argv) > 2 else [])
     elif command == "--revert":
         if len(sys.argv) < 4:
             print("Usage: python3 scan.py --revert <skill-name> <revision-filename>")
@@ -1369,7 +1394,8 @@ def main():
         print(f"Unknown command: {command}")
         print("Available: --scan, --scan-external, --scan-plugins, --list, --find <keyword>,")
         print("           --diagnose, --health, --revisions, --history <skill>, --revert <skill> <rev>,")
-        print("           --recommend <task>  (v3.0.0 two-layer TF-IDF + model recommendation)")
+        print("           --recommend <task>  (v3.0.0 two-layer TF-IDF + model recommendation),")
+        print("           --bench {validate|exam|score|history}  (v3.2.0 bench.py passthrough)")
         sys.exit(1)
 
 

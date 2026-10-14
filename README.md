@@ -4,9 +4,11 @@
   <img src="assets/Sebastian_logo.svg" alt="Sebastian Logo" width="400"/>
 </p>
 
-> 版本 3.0.0 | 作者：[何牟](https://github.com/mou2500)
+> 版本 3.2.0 | 作者：[何牟](https://github.com/mou2500)
 
 Sebastian 是一个**元技能（meta-skill）**，负责编排多步骤工作流。它是调度员，不是执行者。
+
+**v3.2.0 起支持跨工具通用化**：技能引用统一为"调用技能 X"（裸名引用），脚本操作统一为 `python3 ~/.sebastian/scan.py <子命令>` 形式，工具专用命令（如 `/loop`、`/webnovel-*`）标注【仅 Claude 内置/插件】并附降级方式。可在 Claude Code、Codex、Ekko 等任意支持 SKILL.md 的工具中运行核心编排流程。
 
 ## 结构
 
@@ -49,6 +51,14 @@ Sebastian-agent/
 /sebastian revisions           # 查看/回滚技能修订历史
 /sebastian health              # 技能健康度面板
 /sebastian recommend <任务>    # 双层技能推荐（TF-IDF 召回 + 模型精排）
+/sebastian bench <子命令>      # 路由评测透传（validate/exam/score/history，v3.2.0）
+```
+
+**跨工具等价脚本调用**（Codex / Ekko 等无 `/sebastian` 命令的工具有效）：
+
+```
+python3 ~/.sebastian/scan.py --recommend <任务>
+python3 ~/.sebastian/scan.py --bench {validate|exam|score|history}
 ```
 
 ## 安装
